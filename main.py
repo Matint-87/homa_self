@@ -124,6 +124,10 @@ async def start_dual_bots():
     os.makedirs("new_sessions", exist_ok=True)
     
     while True: # حلقه اصلی برای بازگشت در صورت بروز خطا
+        # متغیرهای اپلیکیشن را خارج از try تعریف می‌کنیم تا در finally در دسترس باشند
+        main_app = None
+        panel_app = None
+        
         try:
             print("🚀 در حال مقداردهی سیستم هوما...")
             
@@ -131,7 +135,7 @@ async def start_dual_bots():
             main_app = Application.builder().token(BOT_TOKEN).job_queue(JobQueue()).build()
             panel_app = Application.builder().token(PANEL_BOT_TOKEN).build()
             
-            # 2. ثبت هندلرها (همانند قبل)
+            # 2. ثبت هندلرها
             main_app.add_handler(conv_handler)
             main_app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^طلا"), handle_balance_request))
             main_app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^واریز طلا \d+$"), handle_transfer_request))
@@ -151,27 +155,29 @@ async def start_dual_bots():
             await main_app.start()
             await panel_app.start()
             
-            # استفاده از restart_on_failure برای پایداری در برابر قطع شدن سرور تلگرام
-            await main_app.updater.start_polling(drop_pending_updates=True, restart_on_failure=True)
-            await panel_app.updater.start_polling(drop_pending_updates=True, restart_on_failure=True)
+            # حذف پارامتر restart_on_failure برای سازگاری با همه نسخه‌ها
+            await main_app.updater.start_polling(drop_pending_updates=True)
+            await panel_app.updater.start_polling(drop_pending_updates=True)
             
             print("✅ سیستم هوما با موفقیت فعال شد.")
             
-            # انتظار برای همیشه (تا زمانی که خطایی رخ ندهد)
+            # انتظار برای همیشه
             await asyncio.Event().wait()
 
         except Exception as e:
             print(f"⚠️ خطای بحرانی در سیستم: {e}")
             print("🔄 در حال تلاش برای شروع مجدد در ۱۰ ثانیه...")
             
-            # توقف ایمن قبل از ری‌استارت
+            # توقف ایمن برای جلوگیری از اشغال پورت/سشن
             try:
-                await main_app.stop()
-                await panel_app.stop()
-                await main_app.shutdown()
-                await panel_app.shutdown()
-            except:
-                pass
+                if main_app:
+                    await main_app.stop()
+                    await main_app.shutdown()
+                if panel_app:
+                    await panel_app.stop()
+                    await panel_app.shutdown()
+            except Exception as stop_err:
+                print(f"خطا در توقف ربات: {stop_err}")
                 
             await asyncio.sleep(10)
 
