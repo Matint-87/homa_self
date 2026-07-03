@@ -23,21 +23,6 @@ def register_auto_react(client):
 
         text = event.pattern_match.group(1).strip()
 
-        # حالت حذف
-        if text.endswith("حذف"):
-            target_str = text.replace("حذف", "").strip()
-            try:
-                target_user = await client.get_input_entity(target_str)
-                target_id = getattr(target_user, 'user_id', None)
-                if target_id in active_reactions[user_id]:
-                    del active_reactions[user_id][target_id]
-                    await event.reply(f"❌ ریکشن خودکار برای این کاربر غیرفعال شد.")
-                else:
-                    await event.reply(f"❓ کاربر در لیست فعال نبود.")
-            except Exception as e:
-                await event.reply(f"❌ خطا: {e}")
-            return
-
         # حالت خاموش کردن کل لیست
         if text == "خاموش":
             active_reactions[user_id] = {}
@@ -78,6 +63,43 @@ def register_auto_react(client):
             response += f"👤 آیدی `{t_id}` 👈 ریکشن: {emoji}\n"
         await event.reply(response)
 
+    @client.on(events.NewMessage(pattern=r"^\*?پاکسازی ریکت$"))
+    async def clear_reactions(event):
+        if not event.out:
+            return
+
+        user_id = event.sender_id
+        active_reactions[user_id] = {}
+
+        await event.reply("🗑️ تمام ریکشن‌های خودکار شما پاک شد.")
+
+    @client.on(events.NewMessage(pattern=r"^\*?حذف ریکت$"))
+    async def remove_reaction(event):
+        if not event.out:
+            return
+
+        if not event.is_reply:
+            await event.reply("⚠️ این دستور را روی پیام شخص موردنظر ریپلای کنید.")
+            return
+
+        user_id = event.sender_id
+
+        if user_id not in active_reactions:
+            active_reactions[user_id] = {}
+
+        try:
+            reply = await event.get_reply_message()
+            target_id = reply.sender_id
+
+            if target_id in active_reactions[user_id]:
+                del active_reactions[user_id][target_id]
+                await event.reply("✅ ریکشن خودکار این کاربر حذف شد.")
+            else:
+                await event.reply("❌ برای این کاربر ریکشنی ثبت نشده است.")
+
+        except Exception as e:
+            await event.reply(f"❌ خطا: {e}")
+
     # ۳. هندلر اصلی (عملکرد هوشمند)
     @client.on(events.NewMessage)
     async def incoming_message_reactor(event):
@@ -96,7 +118,7 @@ def register_auto_react(client):
                 await asyncio.sleep(1.5) 
                 
                 await event.client(SendReactionRequest(
-                    peer=event.chat_id,
+                    peer=await event.get_input_chat(),
                     msg_id=event.id,
                     reaction=[ReactionEmoji(emoticon=chosen_emoji)]
                 ))

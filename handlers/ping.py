@@ -19,7 +19,7 @@ async def ping_handler(event):
         text = (
             f"<blockquote>"
             f"🌐 پینگ <code>{ping_in_seconds:.2f}</code> ثانیه"
-            f"🚀 Self Maho"
+            f"🚀 Self Homa"
             f"</blockquote>"
         )
         

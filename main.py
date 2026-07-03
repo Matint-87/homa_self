@@ -30,9 +30,7 @@ from handlers.auth_handler import (
     get_phone, handle_code_calculator_clicks, get_password, cancel
 )
 from handlers.dice_game import (
-    game_buttons_callback,
     handle_balance_request,
-    handle_game_request,
     handle_transfer_request,
 )
 from handlers.panel_handler import handle_panel_clicks
@@ -212,7 +210,6 @@ async def start_dual_bots():
     main_app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^طلا"), handle_balance_request))
     main_app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^واریز طلا \d+$"), handle_transfer_request))
     register_rps_handlers(main_app)
-    main_app.add_handler(CallbackQueryHandler(game_buttons_callback, pattern="^game_"))
     
     # فعال‌سازی جاب (هر یک ساعت)
     main_app.job_queue.run_repeating(deduct_diamonds_job, interval=3600, first=60)
