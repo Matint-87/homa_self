@@ -43,9 +43,9 @@ def get_calculator_keyboard(owner_id):
         ]
     ])
 
-def get_locks_keyboard(owner_id):
+async def get_locks_keyboard(owner_id):
     # دریافت آخرین وضعیت از دیتابیس
-    locks = get_user_locks_from_db(owner_id)
+    locks = await get_user_locks_from_db(owner_id)
     if not locks:
         locks = {
             "username": False, "link": False, "reply": False, "photo": False,
@@ -473,7 +473,7 @@ async def handle_panel_clicks(update, context):
         owner_id = int(parts[2])
         
         from utils import get_auto_reply_from_db, save_auto_reply_to_db
-        config = get_auto_reply_from_db(owner_id)
+        config = await get_auto_reply_from_db(owner_id)
         if not config:
             config = {"enabled": False, "message": " الان آنلاین نیستم، بعداً پیام میدم!", "interval": 30, "mode": "once"}
             
@@ -482,7 +482,7 @@ async def handle_panel_clicks(update, context):
         config["enabled"] = new_status
         
         # ذخیره وضعیت جدید مستقیم در سوپابیس
-        save_auto_reply_to_db(owner_id, {"enabled": new_status})
+        await save_auto_reply_to_db(owner_id, {"enabled": new_status})
         
         # همگام‌سازی سریع با حافظه موقت تلتون
         clients_dict = context.bot_data.get("clients", {})
@@ -518,7 +518,7 @@ async def handle_panel_clicks(update, context):
         lock_key = data.split("_")[1]
         
         # دریافت وضعیت فعلی از دیتابیس
-        current_locks = get_user_locks_from_db(owner_id)
+        current_locks = await get_user_locks_from_db(owner_id)
         if not current_locks:
             current_locks = {
                 "username": False, "link": False, "reply": False, "photo": False,
@@ -570,7 +570,7 @@ async def handle_panel_clicks(update, context):
             "ویرایش شده و رسانه‌های تایم‌دار را مدیریت کنید.</blockquote>"
         )
         
-        reply_markup = get_guard_keyboard(config, owner_id)
+        reply_markup = await get_guard_keyboard(config, owner_id)
         try:
             await query.edit_message_text(text=guard_text, parse_mode="HTML", reply_markup=reply_markup)
         except: pass
@@ -679,7 +679,7 @@ async def handle_panel_clicks(update, context):
         except:
             owner_id = 0
             
-        current_mode = get_user_text_mode(owner_id)
+        current_mode = await get_user_text_mode(owner_id)
         menu_text = "⚙️ **تنظیمات حالت متن**\n\nحالت مورد نظر خود را برای فونت خودکار پیام‌ها انتخاب کنید:"
         
         try:
@@ -699,7 +699,7 @@ async def handle_panel_clicks(update, context):
         except:
             return
             
-        current_mode = get_user_text_mode(owner_id)
+        current_mode = await get_user_text_mode(owner_id)
         
         # سوییچ کردن: اگر دوباره کلیک شد غیرفعال (none) شود، در غیر این صورت مود جدید فعال شود
         new_mode = "none" if current_mode == selected_mode else selected_mode
@@ -723,7 +723,7 @@ async def handle_panel_clicks(update, context):
         except:
             owner_id = 0
             
-        current_action = get_user_chat_action(owner_id)
+        current_action = await get_user_chat_action(owner_id)
         menu_text = "⚙️ **تنظیمات وضعیت اکشن چت**\n\nحالت مورد نظر خود را برای نمایش اکشن فیک انتخاب کنید:"
         
         try:
@@ -743,11 +743,11 @@ async def handle_panel_clicks(update, context):
         except:
             return
             
-        current_action = get_user_chat_action(owner_id)
+        current_action = await get_user_chat_action(owner_id)
         
         # سوییچ وضعیت: کلیک دوباره یعنی خاموش شدن اکشن (none)
         new_action = "none" if current_action == selected_action else selected_action
-        set_user_chat_action(owner_id, new_action)
+        await set_user_chat_action(owner_id, new_action)
         
         menu_text = "⚙️ **تنظیمات وضعیت اکشن چت**\n\nحالت مورد نظر خود را برای نمایش اکشن فیک انتخاب کنید:"
         
@@ -790,7 +790,7 @@ async def handle_panel_clicks(update, context):
         except:
             return
             
-        config = get_user_filters_from_db(owner_id)
+        config = await get_user_filters_from_db(owner_id)
         words = config.get("words", []) if config.get("words") else []
         
         # متن پیش‌نمایش دایرکتوری دستورات به صورت نقل‌قول استاندارد شده HTML
@@ -818,7 +818,7 @@ async def handle_panel_clicks(update, context):
         except:
             return
             
-        config = get_user_filters_from_db(owner_id)
+        config = await get_user_filters_from_db(owner_id)
         new_status = not config.get("enabled", False)
         
         # ذخیره وضعیت جدید به صورت مستقیم در سوپابیس

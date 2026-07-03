@@ -229,7 +229,7 @@ def register_chat_guard(bot):
             
             # خواندن مستقیم آخرین وضعیت از دیتابیس برای هماهنگی با دکمه‌های شیشه‌ای پنل
             from utils import get_chat_guard_from_db
-            cfg = get_chat_guard_from_db(my_id)
+            cfg = await get_chat_guard_from_db(my_id)
             if not cfg:
                 cfg = {"save_deleted": True, "save_edited": True, "save_ttl": True}
 
