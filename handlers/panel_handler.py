@@ -845,13 +845,16 @@ async def handle_panel_clicks(update, context):
 
     # 8            
     elif data.startswith("sett_react_"):
-        # 🌟 تمام ستاره‌ها و دستورات رفتن داخل محیط کد (``) تا هم کپی بشن و هم تلگرام ارور نده
         react_text = (
             ">  دستورات\n"
             "\n"
             ">  `*😂 ریکت`\n"
             "\n"
             ">  `*لیست ریکت`\n"
+            "\n"
+            ">  `*پاکسازی ریکت`\n"
+            "\n"
+            ">  `*حذف ریکت`\n"
         )
         
 
