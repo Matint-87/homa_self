@@ -316,7 +316,7 @@ async def handle_panel_clicks(update, context):
             [
                 InlineKeyboardButton("اکشن", callback_data=f"sett_action_{owner_id}"),
                 InlineKeyboardButton("قفل‌ها", callback_data=f"sett_locks_{owner_id}"),
-                InlineKeyboardButton("لوگو", callback_data=f"sett_logo_{owner_id}"),
+                # InlineKeyboardButton("لوگو", callback_data=f"sett_logo_{owner_id}"),
                 InlineKeyboardButton("پینگ", callback_data=f"sett_ping_{owner_id}")
             ],
             [
@@ -358,7 +358,8 @@ async def handle_panel_clicks(update, context):
             [
                 # InlineKeyboardButton("فضول پروفایل", callback_data=f"sett_stalker_{owner_id}"),
                 InlineKeyboardButton("اطلاعات", callback_data=f"sett_info_{owner_id}"),
-                InlineKeyboardButton("تبچی", callback_data=f"sett_tabchi_{owner_id}"),
+                # InlineKeyboardButton("تبچی", callback_data=f"sett_tabchi_{owner_id}"),
+                InlineKeyboardButton("لوگو", callback_data=f"sett_logo_{owner_id}"),
                 InlineKeyboardButton("پروکسی", callback_data=f"sett_proxy_{owner_id}")
             ],
             [
