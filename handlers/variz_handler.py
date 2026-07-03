@@ -4,7 +4,7 @@ from utils import get_balance, update_balance
 
 def register_variz_handler(client):
     # پترن با ستاره شروع می‌شود و عدد بعد از آن را می‌گیرد
-    @client.on(events.NewMessage(pattern=r'^\*واریز طلا (\d+)$'))
+    @client.on(events.NewMessage(pattern=r'^\*واریز طلا (\d+)$', outgoing=True))
     async def handle_telethon_transfer(event):
         try:
             # گرفتن مقدار عددی از پترن
@@ -31,8 +31,14 @@ def register_variz_handler(client):
                 return
 
             # اعمال تراکنش
-            await update_balance(sender.id, -amount)
-            await update_balance(target.id, amount)
+            if not await update_balance(sender.id, -amount):
+                await event.edit("❌ انتقال انجام نشد.")
+                return
+
+            if not await update_balance(target.id, amount):
+                # در صورت نیاز اینجا موجودی فرستنده را برگردان یا خطا ثبت کن
+                await event.edit("❌ خطا در واریز به گیرنده.")
+                return
 
             # ارسال پیام موفقیت و ویرایش پیام دستور
             await event.edit(
@@ -44,4 +50,8 @@ def register_variz_handler(client):
             
         except Exception as e:
             print(f"Error in telethon transfer: {e}")
-            await event.edit("⚠️ خطایی در انجام تراکنش رخ داد.")
+
+            try:
+                await event.edit("⚠️ خطایی در انجام تراکنش رخ داد.")
+            except:
+                await event.reply("⚠️ خطایی در انجام تراکنش رخ داد.")
