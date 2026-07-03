@@ -76,8 +76,8 @@ async def handle_transfer_request(update: Update, context: ContextTypes.DEFAULT_
         return
 
     # اعمال ترکنش در دیتابیس آنلاین سوپابیس
-    update_balance(from_user.id, -amount)
-    update_balance(to_user.id, amount)
+    await update_balance(from_user.id, -amount)
+    await update_balance(to_user.id, amount)
 
     success_text = (
         f"✅ <b>واریز موفقیت‌آمیز بود!</b>\n\n"
