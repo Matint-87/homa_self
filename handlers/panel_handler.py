@@ -271,8 +271,11 @@ async def handle_panel_clicks(update, context):
     # 2️⃣ زیرمنوی: حساب کاربری
     elif data.startswith("panel_acc_"):
         print(">>> panel_acc clicked")
+        print("1")
         user_name = query.from_user.first_name
+        print("2")
         username = f"@{query.from_user.username}" if query.from_user.username else "ندارد"
+        print("3")
         user_gold_balance = 0  
         
         try:
@@ -280,11 +283,13 @@ async def handle_panel_clicks(update, context):
             clean_owner_id = int(owner_id)
             
             # ایجاد کوئری
+            print("4")
             db_query = supabase.table("users_diamonds").select("diamonds").eq("user_id", clean_owner_id)
             
             # اجرای غیرهمزمان با تابع کمکی
+            print("5")
             response = await db_execute(db_query)
-            
+            print("6", response.data)
             if response.data:
                 user_gold_balance = response.data[0].get("diamonds", 0)
         except Exception as db_error:
@@ -298,7 +303,10 @@ async def handle_panel_clicks(update, context):
         )
         keyboard = [[InlineKeyboardButton("« بازگشت", callback_data=f"panel_main_{owner_id}")]]
         try:
+            print("7")
+            print(caption_text)
             await query.edit_message_text(text=caption_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+            print("8")
         except telegram.error.BadRequest as e:
             if "Message is not modified" in str(e): pass
 
