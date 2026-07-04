@@ -279,28 +279,30 @@ async def handle_panel_clicks(update, context):
         user_gold_balance = 0  
         
         try:
-            from config import supabase  
+            from config import supabase
             clean_owner_id = int(owner_id)
-            
-            # ایجاد کوئری
-            print("4")
-            db_query = supabase.table("users_diamonds").select("diamonds").eq("user_id", clean_owner_id)
-            
-            # اجرای غیرهمزمان با تابع کمکی
-            print("5")
+
+            db_query = (
+                supabase.table("users_diamonds")
+                .select("diamonds")
+                .eq("user_id", clean_owner_id)
+            )
+
             response = await db_execute(db_query)
-            print("6", response.data)
+
             if response.data:
                 user_gold_balance = response.data[0].get("diamonds", 0)
+
         except Exception as db_error:
             print(f"⚠️ Error fetching diamonds from Supabase: {db_error}")
-            caption_text = (
-                f"› <b>اطلاعات حساب کاربری</b>\n\n"
-                f"› <b>نام:</b> {user_name}\n"
-                f"› <b>یوزرنیم:</b> {username}\n"
-                f"› <b>آیدی عددی:</b> <code>{owner_id}</code>\n"
-                f"› <b>موجود طلا:</b> {user_gold_balance:,}"
-            )
+
+        caption_text = (
+            f"› <b>اطلاعات حساب کاربری</b>\n\n"
+            f"› <b>نام:</b> {user_name}\n"
+            f"› <b>یوزرنیم:</b> {username}\n"
+            f"› <b>آیدی عددی:</b> <code>{owner_id}</code>\n"
+            f"› <b>موجود طلا:</b> {user_gold_balance:,}"
+        )
         keyboard = [[InlineKeyboardButton("« بازگشت", callback_data=f"panel_main_{owner_id}")]]
         try:
             await query.edit_message_text(
