@@ -354,14 +354,15 @@ async def handle_panel_clicks(update, context):
                 InlineKeyboardButton("سین خودکار", callback_data=f"sett_seen_{owner_id}")
             ],
             [
-                InlineKeyboardButton("÷ / ×", callback_data=f"sett_calc_{owner_id}"),
+                # InlineKeyboardButton("÷ / ×", callback_data=f"sett_calc_{owner_id}"),
                 InlineKeyboardButton("تقلب", callback_data=f"sett_cheat_{owner_id}"),
                 InlineKeyboardButton("انیمیشن", callback_data=f"sett_anim_{owner_id}"),
                 InlineKeyboardButton("ترجمه", callback_data=f"sett_trans_{owner_id}")
             ],
             [
                 # InlineKeyboardButton("سرچ ویس آماده", callback_data=f"sett_voice_{owner_id}"),
-                InlineKeyboardButton("تگ", callback_data=f"sett_tag_{owner_id}"),
+                InlineKeyboardButton("÷ / ×", callback_data=f"sett_calc_{owner_id}"),
+                # InlineKeyboardButton("تگ", callback_data=f"sett_tag_{owner_id}"),
                 InlineKeyboardButton("تبدیل متن به ویس", callback_data=f"sett_ttv_{owner_id}")
             ],
             [
@@ -373,7 +374,7 @@ async def handle_panel_clicks(update, context):
             ],
             [
                 InlineKeyboardButton("اسکرین", callback_data=f"sett_scr_{owner_id}"),
-                InlineKeyboardButton("قیمت ارز", callback_data=f"sett_currency_{owner_id}"),
+                # InlineKeyboardButton("قیمت ارز", callback_data=f"sett_currency_{owner_id}"),
                 InlineKeyboardButton("کامنت اول", callback_data=f"sett_comment_{owner_id}")
             ],
             [InlineKeyboardButton("« بازگشت", callback_data=f"panel_main_{owner_id}")]

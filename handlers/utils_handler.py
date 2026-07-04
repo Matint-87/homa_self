@@ -31,7 +31,7 @@ def register_utils_handlers(client):
                         f"🔹 **نام خانوادگی:** {last_name}\n"
                         f"🔹 **یوزرنیم:** {username}\n"
                         f"🆔 **آیدی عددی:** `{user.id}`\n"
-                        f"💎 **موجودی:** {balance}"
+                        f"💰 **موجودی:** {balance}"
                     )
                 except Exception as e:
                     print(f"Error fetching user entity: {e}")

@@ -165,7 +165,7 @@ async def load_existing_sessions():
             
         if response.data:
             valid_users = {int(row["user_id"]) for row in response.data}
-        print(f"💎 تعداد {len(valid_users)} کاربر مجاز دریافت شد.")
+        print(f"💰 تعداد {len(valid_users)} کاربر مجاز دریافت شد.")
     except Exception as db_error:
         print(f"⚠️ خطای دیتابیس در خواندن اطلاعات: {db_error}")
         return

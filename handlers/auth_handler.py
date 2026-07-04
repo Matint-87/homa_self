@@ -120,7 +120,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [InlineKeyboardButton("💰 شارژ موجودی (طلا)", callback_data="charge_gold_menu")],
         [InlineKeyboardButton("☎️ پشتیبانی", url=SUPPORT_URL)],
-        [InlineKeyboardButton("🤝 دعوت از دوستان (۳۵ الماس هدیه)", callback_data="menu_referral")],
+        [InlineKeyboardButton("🤝 دعوت از دوستان (۳۵ طلا هدیه)", callback_data="menu_referral")],
         [InlineKeyboardButton("ℹ️ درباره سلف", callback_data="about_self")],
         [InlineKeyboardButton("🔒 بستن پنل مدیریت", callback_data="close_panel")]
     ])
@@ -227,8 +227,8 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
         invite_link = f"https://t.me/{bot_username}?start=inv_{user_id}"
 
         referral_text = (
-            f"🤝 **برنامه دعوت از دوستان (کسب الماس رایگان)**\n\n"
-            f"با لینک خود دوستانتان را دعوت کنید. زمانی که دوست شما وارد ربات شده و اقدام به فعال‌سازی سلف‌بات خود (با پرداخت طلا) کند، سیستم به طور خودکار به شما **۳۵ الماس** هدیه می‌دهد!💎\n\n"
+            f"🤝 **برنامه دعوت از دوستان (کسب طلا رایگان)**\n\n"
+            f"با لینک خود دوستانتان را دعوت کنید. زمانی که دوست شما وارد ربات شده و اقدام به فعال‌سازی سلف‌بات خود (با پرداخت طلا) کند، سیستم به طور خودکار به شما **۳۵ طلا** هدیه می‌دهد!💰\n\n"
             f"🔗 لینک دعوت اختصاصی شما:\n`{invite_link}`\n\n🆔 کد دعوت شما: `{user_id}`"
         )
         keyboard = [[InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main")]]
@@ -242,7 +242,7 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
             try:
                 update_query = supabase.table("users_diamonds").update({"referred_by": pending_code}).eq("user_id", user_id)
                 await db_execute(update_query)
-                await query.edit_message_text("✅ کد معرف با موفقیت ثبت شد! پس از خرید و فعال‌سازی سلف‌بات توسط شما، هدیه ۳۵ الماس به معرف تعلق خواهد گرفت.")
+                await query.edit_message_text("✅ کد معرف با موفقیت ثبت شد! پس از خرید و فعال‌سازی سلف‌بات توسط شما، هدیه ۳۵ طلا به معرف تعلق خواهد گرفت.")
                 context.user_data.pop("pending_invite_code", None)
             except Exception as e:
                 await query.edit_message_text(f"⚠️ خطایی در ثبت خودکار رخ داد: {e}")
@@ -482,7 +482,7 @@ async def process_invite_code_input(update: Update, context: ContextTypes.DEFAUL
 
         update_query = supabase.table("users_diamonds").update({"referred_by": inviter_id, "invite_reward_paid": False}).eq("user_id", user_id)
         await db_execute(update_query)
-        await update.message.reply_text("✅ کد معرف شما با موفقیت ثبت شد.\n🎁 پس از اینکه سلف‌بات خود را با طلا فعال کنید، جایزه ۳۵ الماس به معرف شما تعلق می‌گیرد.", reply_markup=get_start_keyboard())
+        await update.message.reply_text("✅ کد معرف شما با موفقیت ثبت شد.\n🎁 پس از اینکه سلف‌بات خود را با طلا فعال کنید، جایزه ۳۵ طلا به معرف شما تعلق می‌گیرد.", reply_markup=get_start_keyboard())
     except Exception as e:
         await update.message.reply_text(f"⚠️ خطا در ارتباط با دیتابیس: {e}")
 
@@ -554,7 +554,7 @@ async def handle_activation_payment(update: Update, context: ContextTypes.DEFAUL
                 await db_execute(paid_query)
 
                 try:
-                    await context.bot.send_message(chat_id=inviter_id, text=f"🎉 یکی از زیرمجموعه‌های شما سلف‌بات خود را فعال کرد! ۳۵ الماس هدیه به حساب شما واریز شد.💎")
+                    await context.bot.send_message(chat_id=inviter_id, text=f"🎉 یکی از زیرمجموعه‌های شما سلف‌بات خود را فعال کرد! ۳۵ طلا هدیه به حساب شما واریز شد.💰")
                 except:
                     pass
     except Exception as e:

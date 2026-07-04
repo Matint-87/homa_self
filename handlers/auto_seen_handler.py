@@ -14,39 +14,45 @@ def register_auto_seen_handler(client):
             return 
         
         try:
-            # استخراج آیدی کلاینت (بهینه شده)
+            # استخراج آیدی صاحب اکانت
             if not hasattr(event.client, '_cached_my_id') or event.client._cached_my_id is None:
                 me = await event.client.get_me()
                 event.client._cached_my_id = me.id
+            
             owner_id = event.client._cached_my_id
             
-            # بررسی وضعیت از دیتابیس لوکال
-            if owner_id not in AUTO_SEEN_CACHE:
-                try:
-                    from utils import get_auto_seen_from_db
-                    db_status = await get_auto_seen_from_db(owner_id)
-                    AUTO_SEEN_CACHE[owner_id] = bool(db_status) if db_status is not None else False
-                except:
-                    AUTO_SEEN_CACHE[owner_id] = False
+            # === بررسی وضعیت سین خودکار ===
+            try:
+                from utils import get_auto_seen_from_db
+                
+                # همیشه از دیتابیس بخون تا مشکل کش حل بشه
+                db_status = await get_auto_seen_from_db(owner_id)
+                
+                # مهم: حالا bool درست چک می‌کنیم
+                is_active = bool(db_status.get("auto_seen", False)) if isinstance(db_status, dict) else bool(db_status)
+                
+                # آپدیت کش
+                AUTO_SEEN_CACHE[owner_id] = is_active
+                
+            except Exception as db_err:
+                print(f"Error reading auto_seen from DB: {db_err}")
+                is_active = AUTO_SEEN_CACHE.get(owner_id, False)
             
-            is_active = AUTO_SEEN_CACHE.get(owner_id, False)
-            
-            # 🛑 اصلاح اصلی: 
-            # اگر خاموش بود، فقط return کن تا بقیه هندلرها (منشی و...) کارشون رو انجام بدن.
-            # دیگر از StopPropagation استفاده نمی‌کنیم.
+            # اگر خاموش بود، زود خارج شو (تا هندلرهای دیگه مثل منشی کار کنند)
             if not is_active:
                 return 
                 
-            # ارسال آنی درخواست سین به تلگرام
+            # ارسال درخواست سین
             await event.client(functions.messages.ReadHistoryRequest(
                 peer=event.peer_id,
                 max_id=event.id
             ))
             
         except Exception as e:
-            # مدیریت خطاهای احتمالی در سین کردن
-            if "FloodWaitError" in str(e):
+            if "FloodWaitError" in str(e) or "TooMany" in str(e):
                 await asyncio.sleep(5)
+            else:
+                print(f"Auto seen worker error: {e}")
 
     # ۲. دستور تغییر وضعیت با متن
     @client.on(events.NewMessage(pattern=r"^\*?(سین خودکار) (روشن|خاموش)$", outgoing=True))

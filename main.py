@@ -144,7 +144,7 @@ conv_handler = ConversationHandler(
     allow_reentry=True,
 )
 
-# لیست آیدی‌هایی که نباید کسر الماس شوند
+# لیست آیدی‌هایی که نباید کسر طلا شوند
 EXCLUDED_USER_IDS = [8004897709, 8668275780]
 
 # محدودیت تعداد کوئری‌های همزمان برای جلوگیری از غرق شدن thread pool
@@ -152,7 +152,7 @@ _DEDUCT_JOB_CONCURRENCY = 20
 
 
 async def _deduct_single_user(uid: int, current_diamonds: int, semaphore: asyncio.Semaphore):
-    """کسر الماس یا غیرفعال‌سازی یک کاربر، با محدودیت همزمانی"""
+    """کسر طلا یا غیرفعال‌سازی یک کاربر، با محدودیت همزمانی"""
     async with semaphore:
         try:
             if current_diamonds >= 2:
@@ -162,11 +162,11 @@ async def _deduct_single_user(uid: int, current_diamonds: int, semaphore: asynci
                 query = supabase.table("users_diamonds").update({"is_active": False}).eq("user_id", uid)
             await db_execute(query)
         except Exception as e:
-            print(f"❌ خطا در کسر الماس کاربر {uid}: {e}")
+            print(f"❌ خطا در کسر طلا کاربر {uid}: {e}")
 
 
 async def deduct_diamonds_job(context):
-    """کسر ۲ الماس از کاربرانی که سلف‌بات آن‌ها فعال است"""
+    """کسر ۲ طلا از کاربرانی که سلف‌بات آن‌ها فعال است"""
     try:
         # دریافت کاربران فعال (is_active = TRUE)
         query = supabase.table("users_diamonds").select("user_id, diamonds").eq("is_active", True)
@@ -192,7 +192,7 @@ async def deduct_diamonds_job(context):
             await asyncio.gather(*tasks, return_exceptions=True)
 
     except Exception as e:
-        print(f"❌ خطا در عملیات کسر الماس خودکار: {e}")
+        print(f"❌ خطا در عملیات کسر طلا خودکار: {e}")
 
 async def start_dual_bots():
     os.makedirs("new_sessions", exist_ok=True)
