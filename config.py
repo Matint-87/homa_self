@@ -9,7 +9,7 @@ SESSION_NAME="my_selfbot"
 
 BOT_TOKEN = "8978251563:AAGfmEIQXTbDihh3KyBn0vGx349A3YDX9VQ" 
 PANEL_BOT_TOKEN = "8953604452:AAFY80ej-MlFbpG84k1yGAmEnIAxW31kVdI"
-BOT_USERNAME = "Homa_panel_dev_bot"
+BOT_USERNAME = "Homa_panel_self_bot"
 
 CHANNELS = [
     {'id': "@Homa_self_Ch", 'url': "https://t.me/Homa_self_Ch"},
