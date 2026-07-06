@@ -241,7 +241,7 @@ def register_keyword_reply(bot):
             type_emoji = "🎯" if row['type'] == 'exact' else "🔍"
             reply_list.append(
                 f"{i}. {type_emoji} `{row['keyword']}`\n"
-                f"   └ {row['response'][:100]}"
+                f"{row['response'][:100]}"
             )
 
         is_enabled = await get_bot_status(user_id)
@@ -249,8 +249,6 @@ def register_keyword_reply(bot):
         await event.reply(
             f"📋 **لیست پاسخ‌های خودکار شما** ({len(res.data)}/{KEYWORD_LIMIT} مورد):\n\n"
             f"{text}\n\n"
-            f"💡 وضعیت سلف‌بات شما: {'✅ روشن' if is_enabled else '❌ خاموش'}\n"
-            f"🎯 = دقیق | 🔍 = شبیه"
         )
 
     # ********** هندلر پاکسازی کامل کلمات یک کاربر **********
