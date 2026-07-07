@@ -1,31 +1,3 @@
-"""
-============================================================
- Screen Handler — تبدیل پیام به استیکر (مثل @QuotLyBot)
-============================================================
-
-روی پیام کسی ریپلای کن و بنویس:
-    *اسکرین
-
-پیامش به‌صورت یه کارت/استیکر شیک (شبیه quote) ساخته و به همون
-چت فرستاده می‌شه.
-
-نصب پیش‌نیازها:
-    pip install telethon pillow arabic_reshaper python-bidi
-
-⚠️ فونت فارسی لازم داری — فونت‌های پیش‌فرض سیستم معمولاً فارسی رو
-درست رندر نمی‌کنن (حروف از هم جدا می‌افتن). یه فونت .ttf فارسی
-دانلود کن، کنار اسکریپتت بگذار، و مسیرش رو توی CONFIG["font_path"]
-وارد کن. پیشنهاد رایگان: Vazirmatn
-    https://github.com/rastikerdar/vazirmatn/releases
-
-نحوه‌ی استفاده در فایل اصلی:
-    from telethon import TelegramClient
-    from screen_handler import register_screen_handler
-
-    client = TelegramClient(...)
-    register_screen_handler(client)
-"""
-
 import os
 import asyncio
 import tempfile
@@ -37,13 +9,15 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from telethon import events
 from telethon.tl.types import DocumentAttributeSticker, InputStickerSetEmpty
 
+# 📌 پوشه‌ای که همین فایل پایتون داخلشه (مستقل از cwd پروسه در زمان اجرا)
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 CONFIG = {
     "prefix": "*",
     "command": "اسکرین",
 
-    # مسیر فونت فارسی — حتماً قبل از استفاده درستش کن
-    "font_path": "Vazirmatn-SemiBold.ttf",
+    # ⚠️ مسیر مطلق فونت — دیگه به working directory سرویس/systemd/pm2 وابسته نیست.
+    "font_path": os.path.join(_BASE_DIR, "Vazirmatn-SemiBold.ttf"),
     "font_size": 34,
     "name_font_size": 30,
 
@@ -62,17 +36,51 @@ CONFIG = {
 }
 
 
+def _make_font(size: int):
+    """
+    تلاش می‌کنه فونت رو با موتور RAQM بسازه (shaping درست عربی/فارسی از طریق
+    HarfBuzz+FriBidi، مستقل از اینکه فونت گلیف presentation-form داشته باشه یا نه).
+    اگه سیستم libraqm نصب نداشته باشه، به‌صورت خودکار به روش قدیمی برمی‌گرده
+    (که ممکنه حروف جدا نمایش بده — برای رفع کامل، حتماً روی سرور نصب کن:
+    `sudo apt-get install -y libraqm0`).
+    """
+    try:
+        font = ImageFont.truetype(CONFIG["font_path"], size, layout_engine=ImageFont.Layout.RAQM)
+        # یه تست کوچیک که مطمئن بشیم RAQM واقعاً فعاله (وگرنه در زمان draw ارور میده)
+        ImageDraw.Draw(Image.new("RGB", (5, 5))).textlength("آزمایش", font=font, direction="rtl")
+        return font, True
+    except Exception:
+        return ImageFont.truetype(CONFIG["font_path"], size), False
+
+
 def _shape_fa(text: str) -> str:
-    """متن فارسی/عربی رو برای نمایش صحیح (راست‌به‌چپ + اتصال حروف) آماده می‌کنه."""
+    """فقط برای مسیر fallback (بدون RAQM) استفاده می‌شه."""
     return get_display(arabic_reshaper.reshape(text))
 
 
-def _wrap_text(draw, text, font, max_width):
+def _text_width(draw, text, font, use_raqm):
+    if use_raqm:
+        return draw.textlength(text, font=font, direction="rtl")
+    return draw.textlength(_shape_fa(text), font=font)
+
+
+def _draw_rtl_text(draw, right_x, y, text, font, fill, use_raqm):
+    """متن رو طوری رسم می‌کنه که سمت راستش دقیقاً روی right_x بشینه (راست‌چین)."""
+    if use_raqm:
+        w = draw.textlength(text, font=font, direction="rtl")
+        draw.text((right_x - w, y), text, font=font, fill=fill, direction="rtl")
+    else:
+        shaped = _shape_fa(text)
+        w = draw.textlength(shaped, font=font)
+        draw.text((right_x - w, y), shaped, font=font, fill=fill)
+
+
+def _wrap_text(draw, text, font, max_width, use_raqm):
     words = text.split()
     lines, current = [], ""
     for word in words:
         test = (current + " " + word).strip()
-        w = draw.textlength(_shape_fa(test), font=font)
+        w = _text_width(draw, test, font, use_raqm)
         if w <= max_width or not current:
             current = test
         else:
@@ -90,20 +98,20 @@ async def _build_quote_image(client, sender, text: str) -> str:
             "و مسیرش رو توی CONFIG['font_path'] درست کن."
         )
 
-    font = ImageFont.truetype(CONFIG["font_path"], CONFIG["font_size"])
-    name_font = ImageFont.truetype(CONFIG["font_path"], CONFIG["name_font_size"])
+    font, use_raqm = _make_font(CONFIG["font_size"])
+    name_font, _ = _make_font(CONFIG["name_font_size"])
     dummy = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
 
     max_text_width = (
         CONFIG["max_width"] - CONFIG["padding"] * 2 - CONFIG["avatar_size"] - CONFIG["gap"]
     )
-    lines = _wrap_text(dummy, text, font, max_text_width)
+    lines = _wrap_text(dummy, text, font, max_text_width, use_raqm)
 
     name = getattr(sender, "first_name", None) or getattr(sender, "title", None) or "کاربر"
 
     # عرض واقعی موردنیاز رو حساب می‌کنیم (کارت رو فقط به اندازه‌ی لازم بزرگ می‌کنیم)
-    longest_line = max([dummy.textlength(_shape_fa(l), font=font) for l in lines], default=0)
-    name_w = dummy.textlength(_shape_fa(name), font=name_font)
+    longest_line = max([_text_width(dummy, l, font, use_raqm) for l in lines], default=0)
+    name_w = _text_width(dummy, name, name_font, use_raqm)
     content_w = max(longest_line, name_w)
 
     bubble_width = int(min(
@@ -139,20 +147,12 @@ async def _build_quote_image(client, sender, text: str) -> str:
         text_end_x = avatar_x - CONFIG["gap"]
 
     # اسم فرستنده (راست‌چین)
-    shaped_name = _shape_fa(name)
-    draw.text(
-        (text_end_x - dummy.textlength(shaped_name, font=name_font), CONFIG["padding"]),
-        shaped_name, font=name_font, fill=CONFIG["name_color"],
-    )
+    _draw_rtl_text(draw, text_end_x, CONFIG["padding"], name, name_font, CONFIG["name_color"], use_raqm)
 
     # متن پیام، خط‌به‌خط، راست‌چین
     y = CONFIG["padding"] + name_height
     for line in lines:
-        shaped_line = _shape_fa(line)
-        draw.text(
-            (text_end_x - dummy.textlength(shaped_line, font=font), y),
-            shaped_line, font=font, fill=CONFIG["text_color"],
-        )
+        _draw_rtl_text(draw, text_end_x, y, line, font, CONFIG["text_color"], use_raqm)
         y += line_height
 
     # تبدیل به اندازه‌ی استاندارد استیکر و ذخیره به فرمت webp
