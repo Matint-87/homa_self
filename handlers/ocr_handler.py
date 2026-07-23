@@ -2,6 +2,7 @@ from telethon import events
 import pytesseract
 from PIL import Image
 import os
+import sys
 
 def register_ocr_handler(client):
     
@@ -19,7 +20,7 @@ def register_ocr_handler(client):
 
         file_path = None
         try:
-            # دانلود عکس در مسیر موقت (استفاده از شناسه کاربر برای جلوگیری از تداخل نام فایل در صورت همزمانی)
+            # دانلود عکس در مسیر موقت اختصاصی برای هر کاربر
             file_path = await reply.download_media(file=f"temp_ocr_{user_id}.jpg")
             
             # استفاده از Tesseract برای خواندن تصویر
@@ -36,6 +37,9 @@ def register_ocr_handler(client):
             await processing_msg.edit(f"خطایی رخ داد: {str(e)}")
             
         finally:
-            # حذف فایل پس از پردازش
-            if file_path and os.path.exists(file_path):
-                os.path.remove(file_path)
+            # حذف فایل پس از پردازش با استفاده از ماژول اصلی سیستم‌عامل
+            try:
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass
