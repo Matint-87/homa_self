@@ -118,8 +118,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("👥 گروه", url=GROUP_URL, style="primary"),
             InlineKeyboardButton("📢 چنل", url=CHANNEL_URL, style="primary"),
         ],
-        [InlineKeyboardButton("💰 شارژ موجودی (طلا)", callback_data="charge_gold_menu", style="danger")],
-        [InlineKeyboardButton("☎️ پشتیبانی", url=SUPPORT_URL, style="danger")],
+        [
+            InlineKeyboardButton("💰 شارژ موجودی (طلا)", callback_data="charge_gold_menu", style="danger"),
+            InlineKeyboardButton("☎️ پشتیبانی", url=SUPPORT_URL, style="danger"),
+        ],
         [InlineKeyboardButton("🤝 دعوت از دوستان (۳۵ طلا هدیه)", callback_data="menu_referral", style="success")],
         [InlineKeyboardButton("ℹ️ درباره سلف", callback_data="about_self", style="primary")],
         [InlineKeyboardButton("🔒 بستن پنل مدیریت", callback_data="close_panel", style="danger")]
@@ -136,7 +138,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             is_active_db = False
         status_text = "🟢 روشن" if is_active_db else "🔴 خاموش"
-        welcome_text += f"📊 وضعیت سلف‌بات شما: **{status_text}**"
+        welcome_text += f"📊 وضعیت سلف‌بات شما: {status_text}"
 
     if update.message:
         await update.message.reply_text(welcome_text, reply_markup=reply_markup)
@@ -193,7 +195,7 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
 
         status_str = ("🟢 روشن" if is_active_db else "🔴 خاموش") if session_exists else "❌ فعال‌سازی نشده"
         await query.edit_message_text(
-            f"⚙️ **تنظیمات و مدیریت هوما سلف‌بات**\n\n👤 آیدی عددی شما: `{user_id}`\n📊 وضعیت فعلی سلف‌بات: **{status_str}**\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+            f"⚙️ تنظیمات و مدیریت هوما سلف‌بات\n\n👤 آیدی عددی شما: `{user_id}`\n📊 وضعیت فعلی سلف‌بات: {status_str}\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
         return MAIN_MENU
@@ -227,8 +229,8 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
         invite_link = f"https://t.me/{bot_username}?start=inv_{user_id}"
 
         referral_text = (
-            f"🤝 **برنامه دعوت از دوستان (کسب طلا رایگان)**\n\n"
-            f"با لینک خود دوستانتان را دعوت کنید. زمانی که دوست شما وارد ربات شده و اقدام به فعال‌سازی سلف‌بات خود (با پرداخت طلا) کند، سیستم به طور خودکار به شما **۳۵ طلا** هدیه می‌دهد!💰\n\n"
+            f"🤝 برنامه دعوت از دوستان (کسب طلا رایگان)\n\n"
+            f"با لینک خود دوستانتان را دعوت کنید. زمانی که دوست شما وارد ربات شده و اقدام به فعال‌سازی سلف‌بات خود (با پرداخت طلا) کند، سیستم به طور خودکار به شما ۳۵ طلا هدیه می‌دهد!💰\n\n"
             f"🔗 لینک دعوت اختصاصی شما:\n`{invite_link}`\n\n🆔 کد دعوت شما: `{user_id}`"
         )
         keyboard = [[InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main", style="primary")]]
@@ -311,7 +313,7 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
             f"💳 <b>اطلاعات واریز فاکتور خرید طلا:</b>\n\n"
             f"📦 <b>سفارش:</b> خرید {formatted_amount} طلا\n"
             f"💰 <b>مبلغ قابل پرداخت:</b> <code>{formatted_price}</code> تومان\n\n"
-            f"📌 <b>شماره کارت جهت واریز:</b>\n<code>6037697614134663</code> سید حسین قاضی میرسعید\n\n"
+            f"📌 <b>شماره کارت جهت واریز:</b>\n<code>6219861443473474</code> محمد متین ترابی\n\n"
             f"⚠️ <b>دستورالعمل تایید سفارش:</b>\n"
             f"لطفاً مبلغ دقیق فوق را به شماره کارت بالا واریز نمایید، سپس <b>تصویر فیش یا اسکرین‌شات رسید واریزی</b> (اگر فیش فیک بفرستید موجودی شما صفر میشود) .خود را برای پشتیبانی ارسال کنید تا حسابتان شارژ شود.\n\n"
             f"📞 <b>ارتباط با پشتیبانی هوما:</b> @HOMA_SELFBOT_SUPPORT"

@@ -280,6 +280,7 @@ from handlers.dice_game import (
     handle_transfer_request,
 )
 from handlers.panel_handler import handle_panel_clicks
+from handlers.Xogame_handler import register_xo_handlers
 
 # ⚙️ اینلاین هندلر اختصاصی برای پنل سلف‌بات
 async def inline_panel_handler(update, context):
@@ -457,6 +458,8 @@ async def start_dual_bots():
     main_app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^واریز طلا \d+$"), handle_transfer_request))
     register_rps_handlers(main_app)
     register_dice_handlers(main_app)
+    register_xo_handlers(main_app)
+
     
     # فعال‌سازی جاب (هر یک ساعت)
     main_app.job_queue.run_repeating(deduct_diamonds_job, interval=3600, first=60)
