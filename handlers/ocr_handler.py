@@ -8,6 +8,12 @@ def register_ocr_handler(client):
     
     @client.on(events.NewMessage(pattern=r"^\*متن تصویر$"))
     async def extract_text(event):
+        me = await client.get_me()
+
+        # فقط اگر پیام توسط خود این اکانت ارسال شده اجرا شود
+        if event.sender_id != me.id:
+            return
+            
         user_id = event.sender_id
         
         # بررسی اینکه آیا روی عکس ریپلای شده است
