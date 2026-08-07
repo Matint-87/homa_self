@@ -1,11 +1,10 @@
 from telethon import events
 from telethon.tl.functions.account import UpdateProfileRequest
 from telethon.tl.functions.photos import UploadProfilePhotoRequest
-from config import supabase
-from utils import db_execute
+from utils import get_pool  # دسترسی به asyncpg pool مشترک پروژه
 
 # create table user_profiles (
-#   client_id bigint primary key, -- آیدی اکانت تلگرام کاربر
+#   client_id bigint primary key, 
 #   first_name text,
 #   last_name text,
 #   updated_at timestamp with time zone default timezone('utc'::text, now())
@@ -29,13 +28,27 @@ def register_profile_handler(client):
     
     # دیتابیس برای ذخیره نام اصلی
     async def get_or_set_orig_name(client_id, first=None, last=None):
+        pool = get_pool()
+
         if first is not None or last is not None:
-            await db_execute(supabase.table("user_profiles").upsert({
-                "client_id": client_id, "first_name": first, "last_name": last
-            }))
-        res = await db_execute(supabase.table("user_profiles").select("*").eq("client_id", client_id))
-        if res.data:
-            return res.data[0]
+            await pool.execute(
+                """
+                INSERT INTO user_profiles (client_id, first_name, last_name, updated_at)
+                VALUES ($1, $2, $3, timezone('utc'::text, now()))
+                ON CONFLICT (client_id) DO UPDATE
+                SET first_name = EXCLUDED.first_name,
+                    last_name = EXCLUDED.last_name,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                client_id, first, last,
+            )
+
+        row = await pool.fetchrow(
+            "SELECT * FROM user_profiles WHERE client_id = $1", client_id
+        )
+        if row:
+            return dict(row)
+
         me = await client.get_me()
         await get_or_set_orig_name(client_id, me.first_name, me.last_name)
         return {"first_name": me.first_name, "last_name": me.last_name}

@@ -1,39 +1,74 @@
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
+import json
+import asyncpg
 from cachetools import TTLCache
-from config import supabase
+from config import DB_CONFIG
 
 # ============================================================================
-# ⚙️ اجرای همه‌ی کوئری‌های سینکرون Supabase در یک ThreadPool اختصاصی
-# دلیل مشکل اصلی پروژه‌ی قبلی همین‌جا بود: تابع db_execute تعریف شده بود
-# ولی هیچ‌جا استفاده نمی‌شد و همه‌ی کوئری‌ها مستقیم و بلاک‌کننده اجرا می‌شدند،
-# که با هزاران کاربر همزمان کل event loop رو قفل می‌کرد.
+# ⚙️ اتصال به Postgres خودت (روی VPS) با Connection Pool واقعی asyncpg
+# دیگه نیازی به ThreadPoolExecutor نیست — چون قبلاً کلاینت Supabase
+# سینکرون (blocking) بود و مجبور بودیم اجراش رو با run_in_executor به
+# ترد جدا بفرستیم. asyncpg خودش native async هست و مستقیم روی event loop
+# کار می‌کنه، پس اون لایه‌ی execute تو ترد جدا کاملاً حذف شد.
 #
-# پیش‌فرض executor پایتون خیلی کوچیکه (~ min(32, cpu_count+4)).
-# با ۸۰۰۰ کاربر همزمان حتماً باید اندازه‌ش رو افزایش بدی.
+# min_size/max_size همون چیزیه که تو DB_CONFIG فرستادی؛ یعنی حداقل و
+# حداکثر تعداد کانکشن‌های زنده به دیتابیس در Pool. با چند هزار کاربر
+# همزمان همین Pool (نه یک کانکشن تکی) کل بار رو مدیریت می‌کنه.
 # ============================================================================
-DB_EXECUTOR = ThreadPoolExecutor(max_workers=100, thread_name_prefix="supabase_worker")
+_pool: asyncpg.Pool | None = None
 
 
-async def db_execute(query):
-    """اجرای غیرهمزمان Queryهای سینکرون Supabase در thread pool اختصاصی"""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(DB_EXECUTOR, query.execute)
+async def init_db_pool():
+    """این تابع رو یک‌بار موقع بالا اومدن ربات (قبل از start شدن کلاینت‌ها) صدا بزن."""
+    global _pool
+    if _pool is None:
+        _pool = await asyncpg.create_pool(**DB_CONFIG)
+    return _pool
 
 
-async def db_rpc(func_name: str, params: dict):
-    """اجرای غیرهمزمان یک تابع RPC (Postgres function) روی Supabase"""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        DB_EXECUTOR, lambda: supabase.rpc(func_name, params).execute()
+async def close_db_pool():
+    """موقع خاموش کردن تمیز ربات (graceful shutdown) صدا بزن."""
+    global _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
+
+
+def get_pool() -> asyncpg.Pool:
+    """
+    دسترسی سریع به Pool در همه‌جای پروژه.
+    اگه init_db_pool() قبلش صدا زده نشده باشه، خطای واضح میده به‌جای کرش خاموش.
+    """
+    if _pool is None:
+        raise RuntimeError(
+            "دیتابیس هنوز وصل نشده — باید await init_db_pool() رو موقع استارت ربات صدا بزنی."
+        )
+    return _pool
+
+
+async def _upsert_dynamic(table: str, key_col: str, key_val, data: dict):
+    """
+    هلپر عمومی برای UPSERT با ستون‌های دینامیک (به‌جای تکرار کد upsert
+    تو هر تابع). نام ستون‌ها همیشه از دیکشنری‌های ثابت داخل خود پروژه
+    میان (نه مستقیم از ورودی کاربر تلگرام)، پس امن هست که تو query
+    interpolate بشن؛ مقادیر همیشه با پارامتر ($1, $2, ...) پاس داده میشن.
+    """
+    columns = list(data.keys())
+    values = [key_val] + [data[c] for c in columns]
+    col_list = ", ".join([key_col] + columns)
+    placeholders = ", ".join(f"${i + 1}" for i in range(len(values)))
+    update_set = ", ".join(f"{c} = EXCLUDED.{c}" for c in columns)
+    query = (
+        f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) "
+        f"ON CONFLICT ({key_col}) DO UPDATE SET {update_set}"
     )
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(query, *values)
 
 
 # ============================================================================
-# 🧠 کش‌های محدود با TTL (به‌جای دیکشنری‌های نامحدود قبلی)
-# maxsize جلوی رشد بی‌رویه‌ی حافظه رو می‌گیره و ttl باعث میشه داده‌ی قدیمی
-# خودش بعد از مدتی از حافظه پاک بشه (حتی اگه یک instance دیگه از بات هم
-# دیتا رو تغییر داده باشه، خیلی طولانی stale نمی‌مونه).
+# 🧠 کش‌های محدود با TTL — بدون تغییر نسبت به قبل
 # ============================================================================
 CACHE_USER_LOCKS = TTLCache(maxsize=20000, ttl=1800)
 CACHE_AUTO_REPLY = TTLCache(maxsize=20000, ttl=1800)
@@ -44,101 +79,133 @@ CACHE_CHAT_GUARD = TTLCache(maxsize=20000, ttl=1800)
 
 # --- 🔥 توابع مدیریت موجودی طلا (اتمیک و ایمن دربرابر Race Condition واقعی) ---
 #
-# مهم: این بخش نیاز به یک تابع Postgres در Supabase داره تا افزایش/کاهش
-# موجودی به‌صورت اتمیک در خود دیتابیس انجام بشه (نه با read-then-write در پایتون).
-# این SQL رو یک‌بار در Supabase SQL Editor اجرا کن:
+# مهم: این بخش نیاز به یک تابع Postgres داره تا افزایش/کاهش موجودی
+# به‌صورت اتمیک در خود دیتابیس انجام بشه (نه با read-then-write در پایتون).
+# این SQL رو یک‌بار روی Postgres خودت (با psql یا هر کلاینتی) اجرا کن:
 #
-# create or replace function increment_diamonds(p_user_id bigint, p_amount bigint)
-# returns bigint
-# language plpgsql
-# as $$
-# declare
-#   new_balance bigint;
-# begin
-#   insert into users_diamonds (user_id, diamonds)
-#   values (p_user_id, greatest(p_amount, 0))
-#   on conflict (user_id) do update
-#     set diamonds = users_diamonds.diamonds + excluded_amount(p_amount)
-#   returning diamonds into new_balance;
+# CREATE TABLE IF NOT EXISTS users_diamonds (
+#     user_id BIGINT PRIMARY KEY,
+#     diamonds BIGINT NOT NULL DEFAULT 0
+# );
 #
-#   if new_balance < 0 then
-#     raise exception 'insufficient_balance';
-#   end if;
+# CREATE OR REPLACE FUNCTION increment_diamonds(p_user_id BIGINT, p_amount BIGINT)
+# RETURNS BIGINT
+# LANGUAGE plpgsql
+# AS $$
+# DECLARE
+#     new_balance BIGINT;
+# BEGIN
+#     INSERT INTO users_diamonds (user_id, diamonds)
+#     VALUES (p_user_id, GREATEST(p_amount, 0))
+#     ON CONFLICT (user_id) DO UPDATE
+#         SET diamonds = users_diamonds.diamonds + p_amount
+#     RETURNING diamonds INTO new_balance;
 #
-#   return new_balance;
-# end;
+#     IF new_balance < 0 THEN
+#         RAISE EXCEPTION 'insufficient_balance';
+#     END IF;
+#
+#     RETURN new_balance;
+# END;
 # $$;
 #
-# توجه: تابع بالا رو با توجه به نسخه‌ی دقیق Postgres شاید لازم باشه ساده‌تر
-# بنویسی (excluded_amount نمونه‌ی pseudo هست) — اگه بخوای، متن SQL نهایی و
-# تست‌شده رو هم برات آماده می‌کنم.
+# نکته: نسخه‌ی قبلی روی Supabase یه باگ pseudo داشت (excluded_amount که
+# اصلاً وجود نداره) — اینجا درستش کردم و مستقیم از p_amount استفاده شده.
 
 async def get_balance(user_id):
-    """دریافت تعداد طلاهای کاربر از دیتابیس سوپابیس"""
+    """دریافت تعداد طلاهای کاربر از دیتابیس"""
     try:
-        query = supabase.table("users_diamonds").select("diamonds").eq("user_id", int(user_id))
-        response = await db_execute(query)
-        if response.data:
-            return response.data[0]["diamonds"]
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT diamonds FROM users_diamonds WHERE user_id = $1", int(user_id)
+            )
+            if row:
+                return row["diamonds"]
 
-        insert_query = supabase.table("users_diamonds").insert({"user_id": int(user_id), "diamonds": 0})
-        await db_execute(insert_query)
-        return 0
+            await conn.execute(
+                "INSERT INTO users_diamonds (user_id, diamonds) VALUES ($1, 0) "
+                "ON CONFLICT (user_id) DO NOTHING",
+                int(user_id),
+            )
+            return 0
     except Exception as e:
-        print(f"⚠️ خطا در دریافت طلا از سوپابیس: {e}")
+        print(f"⚠️ خطا در دریافت طلا از دیتابیس: {e}")
         return 0
 
 
 async def update_balance(user_id, amount):
     """کم یا زیاد کردن طلاها به صورت اتمیک واقعی (روی سرور دیتابیس، نه در پایتون)"""
     try:
-        response = await db_rpc("increment_diamonds", {"p_user_id": int(user_id), "p_amount": int(amount)})
-        return response.data is not None
-    except Exception as e:
-        # اگه تابع RPC موجودی منفی رو رد کنه (raise exception 'insufficient_balance')
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            await conn.fetchval(
+                "SELECT increment_diamonds($1, $2)", int(user_id), int(amount)
+            )
+            return True
+    except asyncpg.PostgresError as e:
+        # اگه تابع increment_diamonds موجودی منفی رو رد کنه (RAISE EXCEPTION 'insufficient_balance')
         if "insufficient_balance" in str(e):
             return False
-        print(f"⚠️ خطا در آپدیت طلا در سوپابیس: {e}")
+        print(f"⚠️ خطا در آپدیت طلا در دیتابیس: {e}")
+        return False
+    except Exception as e:
+        print(f"⚠️ خطا در آپدیت طلا در دیتابیس: {e}")
         return False
 
 
-# --- 🎮 توابع مدیریت بازی‌ها در Supabase ---
+# --- 🎮 توابع مدیریت بازی‌ها ---
 
 async def save_game(game_id, game_data):
-    """ذخیره یا آپدیت اطلاعات یک بازی مشخص با متد upsert"""
+    """ذخیره یا آپدیت اطلاعات یک بازی مشخص (upsert)"""
     try:
-        query = supabase.table("active_games").upsert({
-            "game_id": str(game_id),
-            "game_data": game_data
-        })
-        await db_execute(query)
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO active_games (game_id, game_data) VALUES ($1, $2::jsonb) "
+                "ON CONFLICT (game_id) DO UPDATE SET game_data = EXCLUDED.game_data",
+                str(game_id),
+                json.dumps(game_data),
+            )
     except Exception as e:
-        print(f"⚠️ خطا در ذخیره بازی در سوپابیس: {e}")
+        print(f"⚠️ خطا در ذخیره بازی در دیتابیس: {e}")
 
 
 async def get_game(game_id):
     """گرفتن اطلاعات یک بازی مشخص از دیتابیس"""
     try:
-        query = supabase.table("active_games").select("game_data").eq("game_id", str(game_id))
-        response = await db_execute(query)
-        if response.data:
-            return response.data[0]["game_data"]
-        return None
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT game_data FROM active_games WHERE game_id = $1", str(game_id)
+            )
+            if row and row["game_data"] is not None:
+                return json.loads(row["game_data"])
+            return None
     except Exception as e:
-        print(f"⚠️ خطا در دریافت اطلاعات بازی از سوپابیس: {e}")
+        print(f"⚠️ خطا در دریافت اطلاعات بازی از دیتابیس: {e}")
         return None
 
 
 async def delete_game(game_id):
     """حذف بازی بعد از اتمام یا لغو شدن از دیتابیس"""
     try:
-        query = supabase.table("active_games").delete().eq("game_id", str(game_id))
-        await db_execute(query)
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM active_games WHERE game_id = $1", str(game_id)
+            )
     except Exception as e:
-        print(f"⚠️ خطا در حذف بازی از سوپابیس: {e}")
+        print(f"⚠️ خطا در حذف بازی از دیتابیس: {e}")
 
 
 # --- 🤫 توابع مدیریت لیست سکوت (دارای سیستم کشینگ TTL) ---
+# نکته: جدول muted_users باید UNIQUE (owner_id, muted_id) داشته باشه تا ON CONFLICT کار کنه:
+# CREATE TABLE IF NOT EXISTS muted_users (
+#     owner_id BIGINT NOT NULL,
+#     muted_id BIGINT NOT NULL,
+#     UNIQUE (owner_id, muted_id)
+# );
 
 async def get_muted_users_from_db(owner_id):
     """دریافت لیست آیدی‌های سکوت شده با اولویت کش حافظه"""
@@ -147,13 +214,16 @@ async def get_muted_users_from_db(owner_id):
         return CACHE_MUTED_USERS[owner_id]
 
     try:
-        query = supabase.table("muted_users").select("muted_id").eq("owner_id", owner_id)
-        response = await db_execute(query)
-        muted_list = [row["muted_id"] for row in response.data] if response.data else []
-        CACHE_MUTED_USERS[owner_id] = muted_list
-        return muted_list
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT muted_id FROM muted_users WHERE owner_id = $1", owner_id
+            )
+            muted_list = [r["muted_id"] for r in rows]
+            CACHE_MUTED_USERS[owner_id] = muted_list
+            return muted_list
     except Exception as e:
-        print(f"⚠️ خطا در دریافت لیست سکوت از سوپابیس: {e}")
+        print(f"⚠️ خطا در دریافت لیست سکوت از دیتابیس: {e}")
         return CACHE_MUTED_USERS.get(owner_id, [])
 
 
@@ -162,8 +232,14 @@ async def add_muted_user_to_db(owner_id, muted_id):
     owner_id = int(owner_id)
     muted_id = int(muted_id)
     try:
-        query = supabase.table("muted_users").upsert({"owner_id": owner_id, "muted_id": muted_id})
-        await db_execute(query)
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO muted_users (owner_id, muted_id) VALUES ($1, $2) "
+                "ON CONFLICT (owner_id, muted_id) DO NOTHING",
+                owner_id,
+                muted_id,
+            )
         if owner_id in CACHE_MUTED_USERS:
             if muted_id not in CACHE_MUTED_USERS[owner_id]:
                 CACHE_MUTED_USERS[owner_id].append(muted_id)
@@ -171,7 +247,7 @@ async def add_muted_user_to_db(owner_id, muted_id):
             CACHE_MUTED_USERS[owner_id] = [muted_id]
         return True
     except Exception as e:
-        print(f"⚠️ خطا در افزودن به لیست سکوت سوپابیس: {e}")
+        print(f"⚠️ خطا در افزودن به لیست سکوت: {e}")
         return False
 
 
@@ -180,17 +256,26 @@ async def remove_muted_user_from_db(owner_id, muted_id):
     owner_id = int(owner_id)
     muted_id = int(muted_id)
     try:
-        query = supabase.table("muted_users").delete().eq("owner_id", owner_id).eq("muted_id", muted_id)
-        await db_execute(query)
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM muted_users WHERE owner_id = $1 AND muted_id = $2",
+                owner_id,
+                muted_id,
+            )
         if owner_id in CACHE_MUTED_USERS and muted_id in CACHE_MUTED_USERS[owner_id]:
             CACHE_MUTED_USERS[owner_id].remove(muted_id)
         return True
     except Exception as e:
-        print(f"⚠️ خطا در حذف از لیست سکوت سوپابیس: {e}")
+        print(f"⚠️ خطا در حذف از لیست سکوت: {e}")
         return False
 
 
 # --- 🔒 توابع مدیریت قفل‌های کاربری ---
+ALLOWED_LOCK_KEYS = {
+    "username", "link", "reply", "photo", "gif", "sticker", "pv", "forward"
+}
+
 
 async def get_user_locks_from_db(user_id):
     """دریافت وضعیت قفل‌ها بدون درگیر کردن دیتابیس برای هر پیام"""
@@ -203,34 +288,48 @@ async def get_user_locks_from_db(user_id):
         "photo": False, "gif": False, "sticker": False, "pv": False, "forward": False
     }
     try:
-        query = supabase.table("user_locks").select("*").eq("user_id", user_id)
-        response = await db_execute(query)
-        if response.data and len(response.data) > 0:
-            CACHE_USER_LOCKS[user_id] = response.data[0]
-            return response.data[0]
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM user_locks WHERE user_id = $1", user_id
+            )
+            if row:
+                data = dict(row)
+                CACHE_USER_LOCKS[user_id] = data
+                return data
 
-        insert_query = supabase.table("user_locks").insert({"user_id": user_id})
-        await db_execute(insert_query)
-        CACHE_USER_LOCKS[user_id] = default_locks
-        return default_locks
+            await conn.execute(
+                "INSERT INTO user_locks (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING",
+                user_id,
+            )
+            CACHE_USER_LOCKS[user_id] = default_locks
+            return default_locks
     except Exception as e:
-        print(f"⚠️ خطا در دریافت قفل‌ها از سوپابیس برای {user_id}: {e}")
+        print(f"⚠️ خطا در دریافت قفل‌ها از دیتابیس برای {user_id}: {e}")
         return default_locks
 
 
 async def save_user_lock_to_db(user_id, lock_key, value):
     """تغییر وضعیت قفل در دیتابیس و اِعمال آنی روی لایه کش سیستم"""
     user_id = int(user_id)
+    if lock_key not in ALLOWED_LOCK_KEYS:
+        print(f"⚠️ نام قفل نامعتبر رد شد: {lock_key}")
+        return False
     try:
-        query = supabase.table("user_locks").upsert({"user_id": user_id, lock_key: bool(value)})
-        await db_execute(query)
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            query = (
+                f"INSERT INTO user_locks (user_id, {lock_key}) VALUES ($1, $2) "
+                f"ON CONFLICT (user_id) DO UPDATE SET {lock_key} = EXCLUDED.{lock_key}"
+            )
+            await conn.execute(query, user_id, bool(value))
         if user_id in CACHE_USER_LOCKS:
             CACHE_USER_LOCKS[user_id][lock_key] = bool(value)
         else:
             await get_user_locks_from_db(user_id)  # لود اولیه کش
         return True
     except Exception as e:
-        print(f"⚠️ خطا در ذخیره قفل در سوپابیس: {e}")
+        print(f"⚠️ خطا در ذخیره قفل در دیتابیس: {e}")
         return False
 
 
@@ -246,39 +345,48 @@ async def get_auto_reply_from_db(user_id):
         "interval": 30, "mode": "once"
     }
     try:
-        query = supabase.table("user_auto_reply").select("*").eq("user_id", user_id)
-        response = await db_execute(query)
-        if response.data and len(response.data) > 0:
-            CACHE_AUTO_REPLY[user_id] = response.data[0]
-            return response.data[0]
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM user_auto_reply WHERE user_id = $1", user_id
+            )
+            if row:
+                data = dict(row)
+                CACHE_AUTO_REPLY[user_id] = data
+                return data
 
-        insert_query = supabase.table("user_auto_reply").insert({"user_id": user_id})
-        await db_execute(insert_query)
-        CACHE_AUTO_REPLY[user_id] = default_config
-        return default_config
+            await conn.execute(
+                "INSERT INTO user_auto_reply (user_id, enabled, message, interval, mode) "
+                "VALUES ($1, $2, $3, $4, $5) ON CONFLICT (user_id) DO NOTHING",
+                user_id, default_config["enabled"], default_config["message"],
+                default_config["interval"], default_config["mode"],
+            )
+            CACHE_AUTO_REPLY[user_id] = default_config
+            return default_config
     except Exception as e:
-        print(f"⚠️ خطا در دریافت تنظیمات منشی از سوپابیس برای {user_id}: {e}")
+        print(f"⚠️ خطا در دریافت تنظیمات منشی از دیتابیس برای {user_id}: {e}")
         return default_config
 
 
 async def save_auto_reply_to_db(user_id, update_data):
     user_id = int(user_id)
     try:
-        update_data["user_id"] = user_id
-        query = supabase.table("user_auto_reply").upsert(update_data)
-        await db_execute(query)
+        data = dict(update_data)
+        data.pop("user_id", None)
+        await _upsert_dynamic("user_auto_reply", "user_id", user_id, data)
 
         if user_id in CACHE_AUTO_REPLY:
-            CACHE_AUTO_REPLY[user_id].update(update_data)
+            CACHE_AUTO_REPLY[user_id].update(data)
         else:
-            CACHE_AUTO_REPLY[user_id] = update_data
+            CACHE_AUTO_REPLY[user_id] = {"user_id": user_id, **data}
         return True
     except Exception as e:
-        print(f"⚠️ خطا در ذخیره تنظیمات منشی در سوپابیس: {e}")
+        print(f"⚠️ خطا در ذخیره تنظیمات منشی در دیتابیس: {e}")
         return False
 
 
 # --- 📑 توابع فیلترینگ کلمات و متون چت ---
+# نکته: ستون words رو jsonb تعریف کن (لیست رشته‌ها).
 
 async def get_user_filters_from_db(user_id):
     user_id = int(user_id)
@@ -287,38 +395,65 @@ async def get_user_filters_from_db(user_id):
 
     default_data = {"user_id": user_id, "enabled": False, "words": []}
     try:
-        query = supabase.table("user_filters").select("*").eq("user_id", user_id)
-        response = await db_execute(query)
-        if response.data and len(response.data) > 0:
-            data = response.data[0]
-            if data.get("words") is None:
-                data["words"] = []
-            CACHE_FILTERS[user_id] = data
-            return data
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM user_filters WHERE user_id = $1", user_id
+            )
+            if row:
+                data = dict(row)
+                if data.get("words") is None:
+                    data["words"] = []
+                elif isinstance(data["words"], str):
+                    data["words"] = json.loads(data["words"])
+                CACHE_FILTERS[user_id] = data
+                return data
 
-        insert_query = supabase.table("user_filters").insert({"user_id": user_id})
-        await db_execute(insert_query)
-        CACHE_FILTERS[user_id] = default_data
-        return default_data
+            await conn.execute(
+                "INSERT INTO user_filters (user_id, enabled, words) VALUES ($1, $2, $3::jsonb) "
+                "ON CONFLICT (user_id) DO NOTHING",
+                user_id, False, json.dumps([]),
+            )
+            CACHE_FILTERS[user_id] = default_data
+            return default_data
     except Exception as e:
-        print(f"⚠️ خطا در دریافت فیلترها از سوپابیس برای {user_id}: {e}")
+        print(f"⚠️ خطا در دریافت فیلترها از دیتابیس برای {user_id}: {e}")
         return default_data
 
 
 async def save_user_filters_to_db(user_id, update_data):
     user_id = int(user_id)
     try:
-        update_data["user_id"] = user_id
-        query = supabase.table("user_filters").upsert(update_data)
-        await db_execute(query)
+        data = dict(update_data)
+        data.pop("user_id", None)
+        if "words" in data:
+            data["words"] = json.dumps(data["words"])
 
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            columns = list(data.keys())
+            values = [user_id] + [data[c] for c in columns]
+            col_list = ", ".join(["user_id"] + columns)
+            placeholders_parts = []
+            for i, c in enumerate(columns, start=2):
+                placeholders_parts.append(f"${i}::jsonb" if c == "words" else f"${i}")
+            placeholders = ", ".join(["$1"] + placeholders_parts)
+            update_set = ", ".join(f"{c} = EXCLUDED.{c}" for c in columns)
+            query = (
+                f"INSERT INTO user_filters ({col_list}) VALUES ({placeholders}) "
+                f"ON CONFLICT (user_id) DO UPDATE SET {update_set}"
+            )
+            await conn.execute(query, *values)
+
+        if "words" in update_data:
+            data["words"] = update_data["words"]  # نسخه‌ی پارس‌شده برای کش، نه رشته‌ی jsonb
         if user_id in CACHE_FILTERS:
-            CACHE_FILTERS[user_id].update(update_data)
+            CACHE_FILTERS[user_id].update({**update_data})
         else:
-            CACHE_FILTERS[user_id] = update_data
+            CACHE_FILTERS[user_id] = {"user_id": user_id, **update_data}
         return True
     except Exception as e:
-        print(f"⚠️ خطا در ذخیره فیلترها در سوپابیس: {e}")
+        print(f"⚠️ خطا در ذخیره فیلترها در دیتابیس: {e}")
         return False
 
 
@@ -331,15 +466,19 @@ async def get_chat_guard_from_db(owner_id: int):
 
     default_data = {"user_id": owner_id, "save_deleted": False, "save_edited": False, "save_ttl": False}
     try:
-        query = supabase.table("chat_guard").select("*").eq("user_id", owner_id)
-        res = await db_execute(query)
-        if res and res.data:
-            CACHE_CHAT_GUARD[owner_id] = res.data[0]
-            return res.data[0]
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM chat_guard WHERE user_id = $1", owner_id
+            )
+            if row:
+                data = dict(row)
+                CACHE_CHAT_GUARD[owner_id] = data
+                return data
     except Exception as e:
         print(f"⚠️ خطا در خواندن نگهبان چت: {e}")
 
-    # همان shape کش‌شده رو برمی‌گردونیم تا سازگار بمونه (باگ نسخه‌ی قبلی)
+    # همون shape پیش‌فرض رو کش می‌کنیم تا سازگار بمونه
     CACHE_CHAT_GUARD[owner_id] = default_data
     return default_data
 
@@ -347,19 +486,14 @@ async def get_chat_guard_from_db(owner_id: int):
 async def save_chat_guard_to_db(owner_id: int, update_data: dict):
     owner_id = int(owner_id)
     try:
-        select_query = supabase.table("chat_guard").select("user_id").eq("user_id", owner_id)
-        res = await db_execute(select_query)
-        if not res.data:
-            insert_query = supabase.table("chat_guard").insert({"user_id": owner_id})
-            await db_execute(insert_query)
-
-        update_query = supabase.table("chat_guard").update(update_data).eq("user_id", owner_id)
-        await db_execute(update_query)
+        data = dict(update_data)
+        data.pop("user_id", None)
+        await _upsert_dynamic("chat_guard", "user_id", owner_id, data)
 
         if owner_id in CACHE_CHAT_GUARD:
-            CACHE_CHAT_GUARD[owner_id].update(update_data)
+            CACHE_CHAT_GUARD[owner_id].update(data)
         else:
-            CACHE_CHAT_GUARD[owner_id] = update_data
+            CACHE_CHAT_GUARD[owner_id] = {"user_id": owner_id, **data}
         return True
     except Exception as e:
         print(f"⚠️ خطا در آپدیت نگهبان چت: {e}")
@@ -370,24 +504,29 @@ async def save_chat_guard_to_db(owner_id: int, update_data: dict):
 
 async def get_auto_seen_from_db(owner_id: int) -> dict:
     try:
-        query = supabase.table("auto_seen_settings").select("*").eq("user_id", int(owner_id))
-        response = await db_execute(query)
-        
-        if response.data and len(response.data) > 0:
-            return response.data[0]
-        
-        # پیش‌فرض: خاموش
-        return {"user_id": owner_id, "auto_seen": False}
-        
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM auto_seen_settings WHERE user_id = $1", int(owner_id)
+            )
+            if row:
+                return dict(row)
+            return {"user_id": owner_id, "auto_seen": False}
     except Exception as e:
         print(f"Error fetching auto seen: {e}")
         return {"user_id": owner_id, "auto_seen": False}
 
+
 async def save_auto_seen_to_db(owner_id: int, status: bool):
     try:
-        data = {"user_id": int(owner_id), "auto_seen": status, "updated_at": "now()"}
-        query = supabase.table("auto_seen_settings").upsert(data)
-        await db_execute(query)
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO auto_seen_settings (user_id, auto_seen, updated_at) "
+                "VALUES ($1, $2, now()) "
+                "ON CONFLICT (user_id) DO UPDATE SET auto_seen = EXCLUDED.auto_seen, updated_at = now()",
+                int(owner_id), status,
+            )
         return True
     except Exception as e:
         print(f"Error saving auto seen: {e}")

@@ -27,8 +27,7 @@ from handlers.keybords import (
     get_join_keyboard,
     get_start_keyboard,
 )
-from utils import get_balance, update_balance, db_execute
-from config import supabase
+from utils import get_balance, update_balance, get_pool  # 👈 اضافه شدن get_pool از utils
 
 CHANNEL_ID = "@Homa_self_Ch"
 GROUP_ID = "@Homa_self_Gp"
@@ -47,10 +46,13 @@ async def monitor_client(user_id: int, client):
     except Exception as e:
         print(f" s_bot {user_id} disconnected: {e}")
     finally:
-        deactivate_client(user_id)  # 👈 پاک‌سازی user_status و clients در حافظه
+        deactivate_client(user_id)  
         try:
-            query = supabase.table("users_diamonds").update({"is_active": False}).eq("user_id", user_id)
-            await db_execute(query)
+            db_pool = get_pool()
+            await db_pool.execute(
+                "UPDATE users_diamonds SET is_active = FALSE WHERE user_id = $1",
+                user_id,
+            )
         except:
             pass
         if user_id in running_tasks:
@@ -106,9 +108,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     try:
-        query = supabase.table("users_diamonds").select("referred_by").eq("user_id", user_id)
-        user_row = await db_execute(query)
-        if not user_row.data or user_row.data[0].get("referred_by") is None:
+        db_pool = get_pool()
+        row = await db_pool.fetchrow(
+            "SELECT referred_by FROM users_diamonds WHERE user_id = $1",
+            user_id,
+        )
+        if not row or row["referred_by"] is None:
             keyboard.append([InlineKeyboardButton("🎁 وارد کردن کد دعوت دوستان", callback_data="enter_invite_menu", style="danger")])
     except:
         pass
@@ -132,9 +137,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if session_exists:
         try:
-            status_query = supabase.table("users_diamonds").select("is_active").eq("user_id", user_id)
-            db_status = await db_execute(status_query)
-            is_active_db = db_status.data[0].get("is_active", False) if db_status.data else False
+            db_pool = get_pool()
+            status_row = await db_pool.fetchrow(
+                "SELECT is_active FROM users_diamonds WHERE user_id = $1",
+                user_id,
+            )
+            is_active_db = status_row["is_active"] if status_row else False
         except:
             is_active_db = False
         status_text = "🟢 روشن" if is_active_db else "🔴 خاموش"
@@ -147,6 +155,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.edit_message_text(welcome_text, reply_markup=reply_markup)
 
     return MAIN_MENU
+
 
 async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -167,14 +176,16 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text("⚠️ اشتراک شما قطع شده است. لطفا ابتدا عضو شوید:", reply_markup=get_join_keyboard())
         return MAIN_MENU
 
-    # ⚙️ هاب مدیریت و فعال‌سازی سلف‌بات
     if data == "menu_activation":
         session_exists = os.path.exists(f"new_sessions/{user_id}.session")
 
         try:
-            status_query = supabase.table("users_diamonds").select("is_active").eq("user_id", user_id)
-            db_status = await db_execute(status_query)
-            is_active_db = db_status.data[0].get("is_active", False) if db_status.data else False
+            db_pool = get_pool()
+            status_row = await db_pool.fetchrow(
+                "SELECT is_active FROM users_diamonds WHERE user_id = $1",
+                user_id,
+            )
+            is_active_db = status_row["is_active"] if status_row else False
         except:
             is_active_db = False
 
@@ -200,9 +211,6 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
         )
         return MAIN_MENU
 
-    # ---------------------------------------------------------
-    # ℹ️ منوی درباره سلف‌بات و توضیحات امنیتی ربات
-    # ---------------------------------------------------------
     elif data == "about_self":
         keyboard = [
             [InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main", style="primary")]
@@ -219,11 +227,9 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
         return MAIN_MENU
 
-    # 🌟 هندل دکمه پرداخت فعال‌سازی
     elif data == "pay_activation":
         return await handle_activation_payment(update, context)
 
-    # 🤝 منوی نمایش لینک دعوت
     elif data == "menu_referral":
         bot_username = context.bot.username
         invite_link = f"https://t.me/{bot_username}?start=inv_{user_id}"
@@ -237,13 +243,16 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(referral_text, reply_markup=InlineKeyboardMarkup(keyboard))
         return MAIN_MENU
 
-    # 🎁 منوی ورود دستی کد دعوت معرف
     elif data == "enter_invite_menu":
         pending_code = context.user_data.get("pending_invite_code")
         if pending_code:
             try:
-                update_query = supabase.table("users_diamonds").update({"referred_by": pending_code}).eq("user_id", user_id)
-                await db_execute(update_query)
+                db_pool = get_pool()
+                await db_pool.execute(
+                    "UPDATE users_diamonds SET referred_by = $1 WHERE user_id = $2",
+                    pending_code,
+                    user_id,
+                )
                 await query.edit_message_text("✅ کد معرف با موفقیت ثبت شد! پس از خرید و فعال‌سازی سلف‌بات توسط شما، هدیه ۳۵ طلا به معرف تعلق خواهد گرفت.")
                 context.user_data.pop("pending_invite_code", None)
             except Exception as e:
@@ -259,10 +268,6 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
         )
         return ENTER_INVITE_CODE
 
-
-    # ---------------------------------------------------------
-    # ۱. منوی باز کردن اولیه ماشین حساب خرید طلا
-    # ---------------------------------------------------------
     elif data == "charge_gold_menu" or data == "cancel_to_menu":
         context.user_data["gold_calculator_amount"] = 0
 
@@ -286,9 +291,6 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
         return MAIN_MENU
 
-    # ---------------------------------------------------------
-    # ۲. خروجی نهایی ماشین حساب: رفتن برای پرداخت و نمایش فاکتور کارت
-    # ---------------------------------------------------------
     elif data == "gold_pay":
         try:
             final_amount = int(context.user_data.get("gold_calculator_amount", 0))
@@ -322,9 +324,6 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
         return MAIN_MENU
 
-    # ---------------------------------------------------------
-    # ۳. پردازش دکمه‌های فشرده شده ماشین حساب طلا (اعداد و Clear/Delete)
-    # ---------------------------------------------------------
     elif data.startswith("gold_"):
         action = data.replace("gold_", "")
 
@@ -377,14 +376,16 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
             pass
         return MAIN_MENU
 
-    # ⏸ خاموش کردن منطقی سلف‌بات
     elif data == "self_stop":
         try:
-            update_query = supabase.table("users_diamonds").update({"is_active": False}).eq("user_id", user_id)
-            await db_execute(update_query)
+            db_pool = get_pool()
+            await db_pool.execute(
+                "UPDATE users_diamonds SET is_active = FALSE WHERE user_id = $1",
+                user_id,
+            )
             if user_id in clients:
                 await clients[user_id].disconnect()
-            deactivate_client(user_id)  # 👈 پاک‌سازی متمرکز user_status و clients
+            deactivate_client(user_id)  
             if user_id in running_tasks:
                 running_tasks[user_id].cancel()
                 del running_tasks[user_id]
@@ -393,7 +394,6 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
             await query.answer(f"خطا در خاموش کردن: {e}", show_alert=True)
         return await start(update, context)
 
-    # ▶️ روشن کردن منطقی و آنی سلف‌بات
     elif data == "self_start":
         session_file = f"new_sessions/{user_id}.session"
         if not os.path.exists(session_file):
@@ -412,12 +412,15 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
             await client.connect()
 
             if await client.is_user_authorized():
-                activate_client(client, user_id)  # 👈 گارد + هندلرها + وضعیت، همه یک‌جا
+                activate_client(client, user_id)  
                 start_client_background(user_id, client)
 
                 try:
-                    update_query = supabase.table("users_diamonds").update({"is_active": True}).eq("user_id", user_id)
-                    await db_execute(update_query)
+                    db_pool = get_pool()
+                    await db_pool.execute(
+                        "UPDATE users_diamonds SET is_active = TRUE WHERE user_id = $1",
+                        user_id,
+                    )
                 except Exception as db_err:
                     print(f"Database error: {db_err}")
 
@@ -429,14 +432,16 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
 
         return await start(update, context)
 
-    # 🗑 حذف کامل سلف‌بات
     elif data == "self_delete":
         try:
-            update_query = supabase.table("users_diamonds").update({"is_active": False}).eq("user_id", user_id)
-            await db_execute(update_query)
+            db_pool = get_pool()
+            await db_pool.execute(
+                "UPDATE users_diamonds SET is_active = FALSE WHERE user_id = $1",
+                user_id,
+            )
             if user_id in clients:
                 await clients[user_id].disconnect()
-            deactivate_client(user_id)  # 👈 پاک‌سازی متمرکز
+            deactivate_client(user_id)  
             if user_id in running_tasks:
                 running_tasks[user_id].cancel()
                 del running_tasks[user_id]
@@ -475,40 +480,25 @@ async def process_invite_code_input(update: Update, context: ContextTypes.DEFAUL
         return MAIN_MENU
 
     try:
-        check_query = supabase.table("users_diamonds").select("user_id").eq("user_id", inviter_id)
-        inviter_check = await db_execute(check_query)
-        if not inviter_check.data:
+        db_pool = get_pool()
+        inviter_row = await db_pool.fetchrow(
+            "SELECT user_id FROM users_diamonds WHERE user_id = $1",
+            inviter_id,
+        )
+        if not inviter_row:
             await update.message.reply_text("❌ چنین کد دعوتی در سیستم ثبت نشده است!")
             return MAIN_MENU
 
-        update_query = supabase.table("users_diamonds").update({"referred_by": inviter_id, "invite_reward_paid": False}).eq("user_id", user_id)
-        await db_execute(update_query)
+        await db_pool.execute(
+            "UPDATE users_diamonds SET referred_by = $1, invite_reward_paid = FALSE WHERE user_id = $2",
+            inviter_id,
+            user_id,
+        )
         await update.message.reply_text("✅ کد معرف شما با موفقیت ثبت شد.\n🎁 پس از اینکه سلف‌بات خود را با طلا فعال کنید، جایزه ۳۵ طلا به معرف شما تعلق می‌گیرد.", reply_markup=get_start_keyboard())
     except Exception as e:
         await update.message.reply_text(f"⚠️ خطا در ارتباط با دیتابیس: {e}")
 
     return MAIN_MENU
-
-
-async def handle_go_to_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    gold_amount = int(query.data.split("_")[3])
-
-    if gold_amount <= 0:
-        await query.answer("⚠️ لطفاً ابتدا تعداد طلا را وارد کنید!", show_alert=True)
-        return
-
-    total_price = gold_amount * 35
-    receipt_text = (
-        f"🛍 **سفارش شما: {gold_amount} طلا به ارزش {total_price} تومان**\n\n"
-        f"💳 شماره کارت:\nبه نام: سید حسین قاضی میرسعید\n"
-        f"لطفا پس از واریز مبلغ فیش دریافتی را به پیوی ادمین ارسال کنید.\n"
-        f"آیدی ادمین: @HOMA_SELFBOT_SUPPORT\n\n"
-        f"نکته: در صورت فرستادن عکس فیش فیک تمامی طلاهای شما صفر خواهد شد."
-    )
-    keyboard = [[InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main", style="primary")]]
-    await query.edit_message_text(receipt_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def handle_activation_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -538,16 +528,21 @@ async def handle_activation_payment(update: Update, context: ContextTypes.DEFAUL
         return MAIN_MENU
 
     try:
-        ref_query = supabase.table("users_diamonds").select("referred_by", "invite_reward_paid").eq("user_id", user_id)
-        user_data_db = await db_execute(ref_query)
-        if user_data_db.data:
-            inviter_id = user_data_db.data[0].get("referred_by")
-            reward_paid = user_data_db.data[0].get("invite_reward_paid", False)
+        db_pool = get_pool()
+        user_data_row = await db_pool.fetchrow(
+            "SELECT referred_by, invite_reward_paid FROM users_diamonds WHERE user_id = $1",
+            user_id,
+        )
+        if user_data_row:
+            inviter_id = user_data_row["referred_by"]
+            reward_paid = user_data_row["invite_reward_paid"] or False
 
             if inviter_id and not reward_paid:
                 await update_balance(inviter_id, 35)
-                paid_query = supabase.table("users_diamonds").update({"invite_reward_paid": True}).eq("user_id", user_id)
-                await db_execute(paid_query)
+                await db_pool.execute(
+                    "UPDATE users_diamonds SET invite_reward_paid = TRUE WHERE user_id = $1",
+                    user_id,
+                )
 
                 try:
                     await context.bot.send_message(chat_id=inviter_id, text=f"🎉 یکی از زیرمجموعه‌های شما سلف‌بات خود را فعال کرد! ۳۵ طلا هدیه به حساب شما واریز شد.💰")
@@ -557,8 +552,11 @@ async def handle_activation_payment(update: Update, context: ContextTypes.DEFAUL
         print(f"Error in referral payout: {e}")
 
     try:
-        active_query = supabase.table("users_diamonds").update({"is_active": True}).eq("user_id", user_id)
-        await db_execute(active_query)
+        db_pool = get_pool()
+        await db_pool.execute(
+            "UPDATE users_diamonds SET is_active = TRUE WHERE user_id = $1",
+            user_id,
+        )
     except:
         pass
 
@@ -573,10 +571,6 @@ async def handle_activation_payment(update: Update, context: ContextTypes.DEFAUL
         reply_markup=phone_keyboard,
     )
     return PHONE
-
-
-async def handle_cancel_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    return await start(update, context)
 
 
 async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -676,7 +670,7 @@ async def handle_code_calculator_clicks(update: Update, context: ContextTypes.DE
             await client.sign_in(phone=login_info["phone"], code=current_code, phone_code_hash=login_info["phone_code_hash"])
             await query.message.reply_text("✅ ورود موفقیت‌آمیز بود! سلف‌بات شما فعال شد.", reply_markup=get_start_keyboard())
 
-            activate_client(client, user_id)  # 👈 گارد + هندلرها + وضعیت، همه یک‌جا
+            activate_client(client, user_id)  
             start_client_background(user_id, client)
 
             del login_data[user_id]
@@ -704,26 +698,21 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     client = clients.get(user_id)
 
     if not client:
-        await update.message.reply_text("❌ خطایی رخ داد. لطفا دوباره تلاش کنید.", reply_markup=get_start_keyboard())
+        await update.message.reply_text("❌ کلاینت یافت نشد. لطفاً از اول /start بزنید.", reply_markup=get_start_keyboard())
         return ConversationHandler.END
 
     try:
-        if not client.is_connected():
-            await client.connect()
-
         await client.sign_in(password=password)
-        await update.message.reply_text("✅ ورود با رمز دو مرحله‌ای موفقیت‌آمیز بود! سلف‌بات شما فعال شد.", reply_markup=get_start_keyboard())
+        await update.message.reply_text("✅ ورود با رمز عبور موفقیت‌آمیز بود! سلف‌بات شما فعال شد.", reply_markup=get_start_keyboard())
 
-        activate_client(client, user_id)  # 👈 گارد + هندلرها + وضعیت، همه یک‌جا
+        activate_client(client, user_id)
         start_client_background(user_id, client)
 
         if user_id in login_data:
             del login_data[user_id]
+
         return ConversationHandler.END
     except Exception as e:
-        await update.message.reply_text(f"❌ رمز عبور اشتباه است یا خطایی رخ داده:\n{e}\n\nلطفاً دوباره رمز عبور را ارسال کنید:")
+        await update.message.reply_text(f"❌ رمز عبور اشتباه است یا خطایی رخ داد:\n{e}\nلطفاً دوباره رمز را بفرستید:")
         return PASSWORD
-
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    return await start(update, context)
+    

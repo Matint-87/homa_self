@@ -2,12 +2,8 @@ import re
 import datetime
 from telethon import events
 
-# ---- وارد کردن کلاینت سوپابیس از فایل کانفیگ ----
-from config import supabase
-
-# ---- استفاده از همون thread pool مشترک تعریف‌شده در db.py ----
-# (به‌جای ساختن یک executor جدید و پراکنده‌کردن منابع)
-from utils import db_execute
+# ---- استفاده از asyncpg pool مشترک تعریف‌شده در utils.py ----
+from utils import get_pool
 from cachetools import TTLCache
 
 # سقف مجاز کلمات کلیدی برای هر کاربر
@@ -16,7 +12,7 @@ KEYWORD_LIMIT = 10
 # ============================================================================
 # 🧠 کش برای مسیر داغ (hot path):
 # قبلاً «keyword_handler» روی هر پیام ورودی از هر کاربر یک کوئری جدا به
-# Supabase می‌زد (هم برای وضعیت روشن/خاموش، هم برای کل لیست کلمات کلیدی).
+# دیتابیس می‌زد (هم برای وضعیت روشن/خاموش، هم برای کل لیست کلمات کلیدی).
 # با ۸۰۰۰ کاربر همزمان و ترافیک پیام بالا، این دقیقاً همون نقطه‌ای بود که
 # دیتابیس رو زیر فشار می‌بره. حالا این دو مورد کش می‌شن و فقط وقتی چیزی
 # واقعاً تغییر کنه (یا TTL تموم بشه) دوباره از دیتابیس خونده می‌شن.
@@ -30,9 +26,11 @@ async def get_bot_status(user_id: int) -> bool:
     if user_id in CACHE_BOT_STATUS:
         return CACHE_BOT_STATUS[user_id]
     try:
-        query = supabase.table("user_bot_settings").select("keyword_enabled").eq("user_id", user_id)
-        res = await db_execute(query)
-        status = res.data[0]["keyword_enabled"] if res.data else True
+        pool = get_pool()
+        row = await pool.fetchrow(
+            "SELECT keyword_enabled FROM user_bot_settings WHERE user_id = $1", user_id
+        )
+        status = row["keyword_enabled"] if row else True
     except Exception as e:
         print(f"Error fetching status for {user_id}: {e}")
         status = True  # به صورت پیش‌فرض روشن است
@@ -42,8 +40,15 @@ async def get_bot_status(user_id: int) -> bool:
 
 async def set_bot_status(user_id: int, status: bool):
     """تغییر وضعیت پاسخ خودکار اختصاصی یک کاربر"""
-    query = supabase.table("user_bot_settings").upsert({"user_id": user_id, "keyword_enabled": status})
-    await db_execute(query)
+    pool = get_pool()
+    await pool.execute(
+        """
+        INSERT INTO user_bot_settings (user_id, keyword_enabled)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id) DO UPDATE SET keyword_enabled = EXCLUDED.keyword_enabled
+        """,
+        user_id, status,
+    )
     CACHE_BOT_STATUS[user_id] = status
 
 
@@ -51,9 +56,11 @@ async def get_keywords_cached(user_id: int):
     """دریافت کل لیست کلمات کلیدی یک کاربر (با کش، برای مسیر داغ پیام‌ها)"""
     if user_id in CACHE_KEYWORDS:
         return CACHE_KEYWORDS[user_id]
-    query = supabase.table("keyword_replies").select("*").eq("user_id", user_id)
-    res = await db_execute(query)
-    data = res.data or []
+    pool = get_pool()
+    rows = await pool.fetch(
+        "SELECT * FROM keyword_replies WHERE user_id = $1", user_id
+    )
+    data = [dict(row) for row in rows]
     CACHE_KEYWORDS[user_id] = data
     return data
 
@@ -114,10 +121,12 @@ def register_keyword_reply(bot):
             await event.reply("❌ کلمه یا پاسخ خالی است!")
             return
 
+        pool = get_pool()
+
         # 🛑 چک کردن محدودیت کلمه برای کاربر
-        count_query = supabase.table("keyword_replies").select("id", count="exact").eq("user_id", user_id)
-        count_res = await db_execute(count_query)
-        current_count = count_res.count if hasattr(count_res, 'count') and count_res.count is not None else len(count_res.data)
+        current_count = await pool.fetchval(
+            "SELECT COUNT(*) FROM keyword_replies WHERE user_id = $1", user_id
+        )
 
         if current_count >= KEYWORD_LIMIT:
             await event.reply(f"🚫 **محدودیت ظرفیت!** شما حداکثر `{KEYWORD_LIMIT}` کلمه می‌توانید ثبت کنید.\n"
@@ -129,21 +138,23 @@ def register_keyword_reply(bot):
             reply_type = "exact"
 
         # بررسی موجود بودن این کلمه *فقط برای این کاربر*
-        check_query = supabase.table("keyword_replies").select("id").eq("user_id", user_id).eq("keyword", keyword)
-        check = await db_execute(check_query)
-        if check.data:
+        existing = await pool.fetchrow(
+            "SELECT id FROM keyword_replies WHERE user_id = $1 AND keyword = $2",
+            user_id, keyword,
+        )
+        if existing:
             await event.reply(f"⚠️ کلمه `{keyword}` قبلاً توسط شما ثبت شده!\n"
                               f"برای ویرایش: `*ویرایش پاسخ ({keyword}) ({response})`")
             return
 
-        # ذخیره با آیدی خود کاربر در Supabase
-        insert_query = supabase.table("keyword_replies").insert({
-            "user_id": user_id,
-            "keyword": keyword,
-            "response": response,
-            "type": reply_type
-        })
-        await db_execute(insert_query)
+        # ذخیره با آیدی خود کاربر در دیتابیس
+        await pool.execute(
+            """
+            INSERT INTO keyword_replies (user_id, keyword, response, type)
+            VALUES ($1, $2, $3, $4)
+            """,
+            user_id, keyword, response, reply_type,
+        )
         invalidate_keywords_cache(user_id)
 
         type_text = "🎯 دقیق" if reply_type == "exact" else "🔍 شامل"
@@ -171,18 +182,24 @@ def register_keyword_reply(bot):
         keyword = parts[0].strip().lower()
         response = parts[1].strip()
 
+        pool = get_pool()
+
         # بررسی و دریافت اطلاعات کلمه متعلق به همین کاربر
-        check_query = supabase.table("keyword_replies").select("response").eq("user_id", user_id).eq("keyword", keyword)
-        check = await db_execute(check_query)
-        if not check.data:
+        existing = await pool.fetchrow(
+            "SELECT response FROM keyword_replies WHERE user_id = $1 AND keyword = $2",
+            user_id, keyword,
+        )
+        if not existing:
             await event.reply(f"❌ کلمه `{keyword}` در لیست شما یافت نشد!")
             return
 
-        old_response = check.data[0]['response']
+        old_response = existing["response"]
 
         # آپدیت مشروط به آیدی کاربر
-        update_query = supabase.table("keyword_replies").update({"response": response}).eq("user_id", user_id).eq("keyword", keyword)
-        await db_execute(update_query)
+        await pool.execute(
+            "UPDATE keyword_replies SET response = $1 WHERE user_id = $2 AND keyword = $3",
+            response, user_id, keyword,
+        )
         invalidate_keywords_cache(user_id)
 
         await event.reply(
@@ -207,11 +224,14 @@ def register_keyword_reply(bot):
 
         keyword = parts[0].strip().lower()
 
-        # حذف ایمن فقط برای کلمه خود کاربر
-        delete_query = supabase.table("keyword_replies").delete().eq("user_id", user_id).eq("keyword", keyword)
-        delete_res = await db_execute(delete_query)
+        # حذف ایمن فقط برای کلمه خود کاربر - با RETURNING متن پاسخِ حذف‌شده رو برمی‌گردونیم
+        pool = get_pool()
+        deleted_row = await pool.fetchrow(
+            "DELETE FROM keyword_replies WHERE user_id = $1 AND keyword = $2 RETURNING response",
+            user_id, keyword,
+        )
 
-        if not delete_res.data:
+        if not deleted_row:
             await event.reply(f"❌ کلمه `{keyword}` در لیست شما یافت نشد!")
             return
 
@@ -219,7 +239,7 @@ def register_keyword_reply(bot):
         await event.reply(
             f"🗑️ **پاسخ حذف شد!**\n"
             f"🔑 کلمه: `{keyword}`\n"
-            f"💬 پاسخ حذف شده: `{delete_res.data[0]['response']}`"
+            f"💬 پاسخ حذف شده: `{deleted_row['response']}`"
         )
 
     # ********** هندلر لیست پاسخ‌ها **********
@@ -230,25 +250,29 @@ def register_keyword_reply(bot):
 
         user_id = event.sender_id
         # فیلتر بر اساس کاربر
-        query = supabase.table("keyword_replies").select("*").eq("user_id", user_id)
-        res = await db_execute(query)
-        if not res.data:
+        pool = get_pool()
+        rows = await pool.fetch(
+            "SELECT * FROM keyword_replies WHERE user_id = $1", user_id
+        )
+        if not rows:
             await event.reply("📭 هیچ پاسخی ثبت نکرده‌اید!")
             return
 
         reply_list = []
-        for i, row in enumerate(res.data, 1):
+        for i, row in enumerate(rows, 1):
             type_emoji = "🎯" if row['type'] == 'exact' else "🔍"
             reply_list.append(
                 f"{i}. {type_emoji} `{row['keyword']}`\n"
-                f"{row['response'][:100]}"
+                f"   └ {row['response'][:100]}"
             )
 
         is_enabled = await get_bot_status(user_id)
         text = '\n\n'.join(reply_list)
         await event.reply(
-            f"📋 **لیست پاسخ‌های خودکار شما** ({len(res.data)}/{KEYWORD_LIMIT} مورد):\n\n"
+            f"📋 **لیست پاسخ‌های خودکار شما** ({len(rows)}/{KEYWORD_LIMIT} مورد):\n\n"
             f"{text}\n\n"
+            f"💡 وضعیت سلف‌بات شما: {'✅ روشن' if is_enabled else '❌ خاموش'}\n"
+            f"🎯 = دقیق | 🔍 = شبیه"
         )
 
     # ********** هندلر پاکسازی کامل کلمات یک کاربر **********
@@ -258,10 +282,12 @@ def register_keyword_reply(bot):
             return
 
         user_id = event.sender_id
-        # فقط کلمات این کاربر حذف می‌شوند
-        query = supabase.table("keyword_replies").delete().eq("user_id", user_id)
-        res = await db_execute(query)
-        count = len(res.data) if res.data else 0
+        # فقط کلمات این کاربر حذف می‌شوند - با RETURNING تعداد ردیف‌های حذف‌شده رو می‌شماریم
+        pool = get_pool()
+        deleted_rows = await pool.fetch(
+            "DELETE FROM keyword_replies WHERE user_id = $1 RETURNING id", user_id
+        )
+        count = len(deleted_rows)
 
         invalidate_keywords_cache(user_id)
         await event.reply(f"🗑️ **هر {count} پاسخ شما از دیتابیس حذف شدند!**")

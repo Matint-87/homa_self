@@ -3,10 +3,7 @@ import asyncio
 from datetime import datetime, timedelta
 from telethon import events, functions, types
 from telethon.errors import FloodWaitError, RPCError, MessageNotModifiedError
-from utils import db_execute  # ایمپورت تابع مدیریت ترد
-
-# ایمپورت اتصال سوپابیس از کانفیگ اصلی پروژه‌تان
-from config import supabase  
+from utils import get_pool  # دسترسی به asyncpg pool مشترک پروژه
 
 UPDATE_INTERVAL = 60   # ثانیه
 IDLE_SLEEP = 10        # ثانیه
@@ -44,30 +41,48 @@ def render_clock(font_no: int) -> str:
     return "".join(font.get(ch, ch) for ch in raw)
 
 # ---------------------------------------------------------------------------
-# توابع مدیریت دیتابیس سوپابیس
+# توابع مدیریت دیتابیس (Postgres)
 # ---------------------------------------------------------------------------
 async def db_get_settings(user_id: int) -> dict:
     try:
-        query = supabase.table("user_clocks").select("*").eq("user_id", user_id)
-        res = await db_execute(query)
-        if res.data:
-            return res.data[0]
-        
+        pool = get_pool()
+        row = await pool.fetchrow(
+            "SELECT * FROM user_clocks WHERE user_id = $1", user_id
+        )
+        if row:
+            return dict(row)
+
         default = {
             "user_id": user_id, "bio_clock": False, "name_clock": False,
             "premium_clock": False, "font": 1, "base_bio": "", "base_last_name": ""
         }
-        insert_query = supabase.table("user_clocks").insert(default)
-        await db_execute(insert_query)
+        await pool.execute(
+            """
+            INSERT INTO user_clocks (user_id, bio_clock, name_clock, premium_clock, font, base_bio, base_last_name)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (user_id) DO NOTHING
+            """,
+            default["user_id"], default["bio_clock"], default["name_clock"],
+            default["premium_clock"], default["font"], default["base_bio"], default["base_last_name"],
+        )
         return default
     except Exception as e:
         print(f"⚠️ DB Error get settings for {user_id}: {e}")
         return None
 
 async def db_update_settings(user_id: int, **kwargs):
+    if not kwargs:
+        return
     try:
-        query = supabase.table("user_clocks").update(kwargs).eq("user_id", user_id)
-        await db_execute(query)
+        pool = get_pool()
+
+        # ساخت پویای بخش SET بر اساس فیلدهایی که پاس داده شدن
+        columns = list(kwargs.keys())
+        values = list(kwargs.values())
+        set_clause = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(columns))
+
+        query = f"UPDATE user_clocks SET {set_clause} WHERE user_id = $1"
+        await pool.execute(query, user_id, *values)
     except Exception as e:
         print(f"⚠️ DB Error update settings for {user_id}: {e}")
 

@@ -1,8 +1,7 @@
 import asyncio
 from telethon import events
 from telethon.tl.types import MessageEntitySpoiler
-from utils import db_execute
-from config import supabase
+from utils import get_pool  # دسترسی به asyncpg pool مشترک پروژه
 
 # =====================================================================
 # 🗄️ بخش اول: توابع دیتابیس (Async)
@@ -11,10 +10,12 @@ from config import supabase
 async def get_user_text_mode(user_id: int) -> str:
     """دریافت مود فعلی متن کاربر از دیتابیس به صورت غیرهمزمان"""
     try:
-        query = supabase.table("user_text_modes").select("mode").eq("user_id", user_id)
-        res = await db_execute(query)
-        if res.data:
-            return res.data[0]["mode"]
+        pool = get_pool()
+        row = await pool.fetchrow(
+            "SELECT mode FROM user_text_modes WHERE user_id = $1", user_id
+        )
+        if row:
+            return row["mode"]
     except Exception as e:
         print(f"❌ Error fetching text mode: {e}")
     return "none"
@@ -22,8 +23,15 @@ async def get_user_text_mode(user_id: int) -> str:
 async def set_user_text_mode(user_id: int, mode: str):
     """ذخیره یا آپدیت مود متن کاربر در دیتابیس به صورت غیرهمزمان"""
     try:
-        query = supabase.table("user_text_modes").upsert({"user_id": user_id, "mode": mode})
-        await db_execute(query)
+        pool = get_pool()
+        await pool.execute(
+            """
+            INSERT INTO user_text_modes (user_id, mode)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) DO UPDATE SET mode = EXCLUDED.mode
+            """,
+            user_id, mode,
+        )
     except Exception as e:
         print(f"❌ Error saving text mode: {e}")
 

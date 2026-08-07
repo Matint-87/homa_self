@@ -1,8 +1,7 @@
 import asyncio
 from telethon import events
-from config import supabase
-from utils import db_execute
-
+from utils import get_pool  # دسترسی به asyncpg pool مشترک پروژه
+import json
 # لیست کلمات پیش‌فرض برای کاربران جدید
 DEFAULT_FRIENDS = ["الهی من فداتشم", "عاشقتم لعنتی", "نوازش موهات مرا مست میکند", "تو برام با ارزش ترین هدیه ای", "بدون تو زندگی معنا نداره", "بغلت برام امن ترین جاست", "جزو آرزوهامی تو", "خیلی دوستت دارم", "خداروشکر بابت بودنت", "قشنگ ترین فرشته"]
 DEFAULT_ENEMIES = ["کیر تو کص مادرت", "مامانتو خوردم", "حرومزاده بی وجود", "خیلی مامانتو دوست دارم", "بی خایه کصخل", "برج خلیفه تو کص ننت", "مادرت ارضام کرد", "اوب زاده", "چه کون قشنگی داری", "دهن مادرتو گاییدم"]
@@ -14,36 +13,83 @@ TARGET_COUNTERS = {}
 
 
 async def get_or_create_settings_cached(owner_id: int) -> dict:
-    """دریافت تنظیمات از رم؛ اگر نبود از سوپابیس می‌خواند"""
+    """دریافت تنظیمات از رم؛ اگر نبود از دیتابیس می‌خواند"""
     if owner_id in GLOBAL_CACHE:
         return GLOBAL_CACHE[owner_id]
 
     try:
-        query = supabase.table("maho_user_settings").select("*").eq("owner_id", owner_id)
-        res = await db_execute(query)
-        if res.data:
-            GLOBAL_CACHE[owner_id] = res.data[0]
-            return GLOBAL_CACHE[owner_id]
+        pool = get_pool()
+        row = await pool.fetchrow(
+            "SELECT * FROM maho_user_settings WHERE owner_id = $1", owner_id
+        )
+        if row:
+            settings = dict(row)
 
+            def parse_json(value, default):
+                if not value:
+                    return default.copy()
+
+                if isinstance(value, str):
+                    try:
+                        return json.loads(value)
+                    except:
+                        return default.copy()
+
+                return value
+
+
+            settings["friends"] = parse_json(
+                settings.get("friends"),
+                DEFAULT_FRIENDS
+            )
+
+            settings["enemies"] = parse_json(
+                settings.get("enemies"),
+                DEFAULT_ENEMIES
+            )
+
+            settings["target_friends"] = parse_json(
+                settings.get("target_friends"),
+                []
+            )
+
+            settings["target_enemies"] = parse_json(
+                settings.get("target_enemies"),
+                []
+            )
+
+
+            GLOBAL_CACHE[owner_id] = settings
+            return GLOBAL_CACHE[owner_id]
         new_settings = {
             "owner_id": owner_id,
-            "friends": DEFAULT_FRIENDS,
-            "enemies": DEFAULT_ENEMIES,
+            "friends": DEFAULT_FRIENDS.copy(),
+            "enemies": DEFAULT_ENEMIES.copy(),
             "target_friends": [],
             "target_enemies": []
         }
-        insert_query = supabase.table("maho_user_settings").insert(new_settings)
-        await db_execute(insert_query)
+        
+        # درج در دیتابیس با تعیین صریح نوع داده آرایه‌ها
+        await pool.execute(
+            """
+            INSERT INTO maho_user_settings 
+            (owner_id, friends, enemies, target_friends, target_enemies)
+            VALUES ($1, $2, $3, $4, $5)
+            """,
+            new_settings["owner_id"],
+            json.dumps(new_settings["friends"], ensure_ascii=False),
+            json.dumps(new_settings["enemies"], ensure_ascii=False),
+            json.dumps(new_settings["target_friends"], ensure_ascii=False),
+            json.dumps(new_settings["target_enemies"], ensure_ascii=False),
+        )
         GLOBAL_CACHE[owner_id] = new_settings
         return new_settings
     except Exception as e:
-        print(f"Error in Supabase Cache operation: {e}")
+        print(f"Error in DB Cache operation: {e}")
         return None
 
 
 def register_reply_handlers(client):
-    print("⚡ ماژول دوست/دشمن (نسخه چرخشی، ترتیبی و بدون تداخل) بارگذاری شد.")
-
     # 1️⃣ شلیک خودکار، ترتیبی و آنی (Looping & Sequential)
     @client.on(events.NewMessage(incoming=True))
     async def auto_responder(event):
@@ -131,16 +177,23 @@ def register_reply_handlers(client):
         # ریست کردن شمارنده چرخشی این کاربر
         TARGET_COUNTERS[f"{owner_id}_{target_id}"] = 0
 
-        # آپدیت رم و سوپابیس
+        # آپدیت رم و دیتابیس
         settings["target_friends"] = list(t_friends)
         settings["target_enemies"] = list(t_enemies)
         GLOBAL_CACHE[owner_id] = settings
 
-        update_query = supabase.table("maho_user_settings").update({
-            "target_friends": settings["target_friends"],
-            "target_enemies": settings["target_enemies"]
-        }).eq("owner_id", owner_id)
-        await db_execute(update_query)
+        pool = get_pool()
+        await pool.execute(
+            """
+            UPDATE maho_user_settings 
+            SET target_friends = $1::jsonb,
+                target_enemies = $2::jsonb
+            WHERE owner_id = $3
+            """,
+            json.dumps(settings["target_friends"]),
+            json.dumps(settings["target_enemies"]),
+            owner_id,
+        )
 
         await event.respond(msg, parse_mode='html')
 
@@ -165,52 +218,78 @@ def register_reply_handlers(client):
         # حذف شمارنده چرخشی برای خالی شدن مموری
         TARGET_COUNTERS.pop(f"{owner_id}_{target_id}", None)
 
+        pool = get_pool()
+
         if command == "دوست":
             targets = settings.get("target_friends", [])
             if target_id in targets:
                 targets.remove(target_id)
             settings["target_friends"] = targets
             GLOBAL_CACHE[owner_id] = settings
-            update_query = supabase.table("maho_user_settings").update({"target_friends": targets}).eq("owner_id", owner_id)
-            await db_execute(update_query)
+            await pool.execute(
+                """
+                UPDATE maho_user_settings 
+                SET target_friends = $1::jsonb
+                WHERE owner_id = $2
+                """,
+                json.dumps(targets),
+                owner_id,
+            )
         else:
             targets = settings.get("target_enemies", [])
             if target_id in targets:
                 targets.remove(target_id)
             settings["target_enemies"] = targets
             GLOBAL_CACHE[owner_id] = settings
-            update_query = supabase.table("maho_user_settings").update({"target_enemies": targets}).eq("owner_id", owner_id)
-            await db_execute(update_query)
+            await pool.execute(
+                """
+                UPDATE maho_user_settings 
+                SET target_enemies = $1::jsonb
+                WHERE owner_id = $2
+                """,
+                json.dumps(targets),
+                owner_id,
+            )
 
         text = f"<blockquote> شخص موردنظر از لیست {command}ان شما حذف شد و وضعیت عادی شد.</blockquote>"
         await event.edit(text, parse_mode='html')
 
-    # 4️⃣ مشاهده لیست کاربران هدف (*لیست دوست یا *لیست دشمن)
     @client.on(events.NewMessage(outgoing=True, pattern=r"^\*لیست (دوست|دشمن)$"))
     async def handle_list(event):
         me = await event.client.get_me()
         owner_id = me.id
         command = event.pattern_match.group(1)
 
-        # مشخص کردن فیلد مربوط به تارگت‌ها در JSONB
         field = "target_friends" if command == "دوست" else "target_enemies"
 
         settings = await get_or_create_settings_cached(owner_id)
+
         if not settings:
             return
 
         targets = settings.get(field, [])
-        title = "لیست کاربران دوست شما:" if command == "دوست" else " لیست کاربران دشمن شما:"
+
+
+        title = "لیست کاربران دوست شما:" if command == "دوست" else "لیست کاربران دشمن شما:"
 
         if targets:
             msg_text = f"<blockquote><b>{title}</b>\n\n"
-            for i, target_id in enumerate(targets, 1):
-                msg_text += f"{i}_ آیدی: <code>{target_id}</code> | <a href='tg://user?id={target_id}'>پروفایل کاربر</a>\n"
-            msg_text += "</blockquote>"
-            await event.edit(msg_text, parse_mode='html')
-        else:
-            await event.edit(f"<blockquote>لیست کاربران {command} شما خالی است.</blockquote>", parse_mode='html')
 
+            for i, target_id in enumerate(targets, 1):
+                msg_text += (
+                    f"{i}_ آیدی: <code>{target_id}</code> | "
+                    f"<a href='tg://user?id={target_id}'>پروفایل کاربر</a>\n"
+                )
+
+            msg_text += "</blockquote>"
+
+            await event.edit(msg_text, parse_mode='html')
+
+        else:
+            await event.edit(
+                f"<blockquote>لیست کاربران {command} شما خالی است.</blockquote>",
+                parse_mode='html'
+            )
     # 5️⃣ افزودن کلمه جدید (*دوست افزودن متن)
     @client.on(events.NewMessage(outgoing=True, pattern=r"^\*(دوست|دشمن) افزودن (.+)$"))
     async def handle_add_word(event):
@@ -231,8 +310,17 @@ def register_reply_handlers(client):
             settings[field] = words
             GLOBAL_CACHE[owner_id] = settings
 
-            update_query = supabase.table("maho_user_settings").update({field: words}).eq("owner_id", owner_id)
-            await db_execute(update_query)
+            pool = get_pool()
+            column = "friends" if field == "friends" else "enemies"
+            await pool.execute(
+                f"""
+                UPDATE maho_user_settings 
+                SET {column} = $1::jsonb
+                WHERE owner_id = $2
+                """,
+                json.dumps(words, ensure_ascii=False),
+                owner_id,
+            )
             await event.edit(f"<blockquote> کلمه جدید به لیست {command} شما اضافه شد.</blockquote>", parse_mode='html')
         else:
             await event.edit("<blockquote> این کلمه از قبل در لیست شما موجود است.</blockquote>", parse_mode='html')

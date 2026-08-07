@@ -6,7 +6,7 @@ import re
 from utils import get_user_locks_from_db, save_user_lock_to_db
 from handlers.text_mode_handler import get_user_text_mode, set_user_text_mode 
 from handlers.chat_action_handler import get_user_chat_action, set_user_chat_action
-from utils import get_user_filters_from_db, save_user_filters_to_db, db_execute
+from utils import get_user_filters_from_db, save_user_filters_to_db, get_pool
 from utils import get_chat_guard_from_db, save_chat_guard_to_db
 
 CALC_STATE = {}
@@ -293,22 +293,19 @@ async def handle_panel_clicks(update, context):
         user_gold_balance = 0  
         
         try:
-            from config import supabase
             clean_owner_id = int(owner_id)
 
-            db_query = (
-                supabase.table("users_diamonds")
-                .select("diamonds")
-                .eq("user_id", clean_owner_id)
+            pool = get_pool()
+            row = await pool.fetchrow(
+                "SELECT diamonds FROM users_diamonds WHERE user_id = $1",
+                clean_owner_id,
             )
 
-            response = await db_execute(db_query)
-
-            if response.data:
-                user_gold_balance = response.data[0].get("diamonds", 0)
+            if row:
+                user_gold_balance = row["diamonds"] or 0
 
         except Exception as db_error:
-            print(f"⚠️ Error fetching diamonds from Supabase: {db_error}")
+            print(f"⚠️ Error fetching diamonds from Postgres: {db_error}")
 
         toman_balance = user_gold_balance * 35
         caption_text = (
@@ -886,7 +883,7 @@ async def handle_panel_clicks(update, context):
         react_text = (
             ">  دستورات\n"
             "\n"
-            ">  `*😂 ریکت`\n"
+            ">  `*ریکت ❤️`\n"
             "\n"
             ">  `*لیست ریکت`\n"
             "\n"
@@ -1087,9 +1084,7 @@ async def handle_panel_clicks(update, context):
             "\n"
             ">  `*حذف دوست`\n"
             "\n"
-            ">  `*لیست دوستان`\n"
-            "\n"
-            ">  `*پاکسازی دوستان`\n"
+            ">  `*لیست دوست`\n"
         )
         
         # بازگشت به منوی قبلی یعنی همان sett_fr_en_
@@ -1119,9 +1114,7 @@ async def handle_panel_clicks(update, context):
             "\n"
             ">  `*حذف دشمن`\n"
             "\n"
-            ">  `*لیست دشمنان`\n"
-            "\n"
-            ">  `*پاکسازی دشمنان`\n"
+            ">  `*لیست دشمن`\n"
         )
         
         # بازگشت به منوی قبلی یعنی همان sett_fr_en_
@@ -1563,11 +1556,11 @@ async def handle_panel_clicks(update, context):
             "\n"
             ">  `*پاسخ خاموش`\n"
             "\n"
-            ">  `*پاسخ کلمه`\n"
+            ">  `*پاسخ (سلام) (علیک)`\n"
             "\n"
-            ">  `*ویرایش پاسخ کلمه`\n"
+            ">  `*ویرایش پاسخ (سلام) (سلام)`\n"
             "\n"
-            ">  `*حذف پاسخ`\n"
+            ">  `*حذف پاسخ (سلام) (علیک)`\n"
             "\n"
             ">  `*لیست پاسخ`\n"
             "\n"

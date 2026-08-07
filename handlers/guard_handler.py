@@ -1,6 +1,5 @@
 from telethon import events
-from utils import db_execute
-from config import supabase
+from utils import get_pool  # دسترسی به asyncpg pool مشترک پروژه
 
 guard_status = {}
 
@@ -30,14 +29,18 @@ def register_guard_handler(client):
             
         me = await event.client.get_me()
         if event.message.text:
-            query = supabase.table("messages_log").insert({
-                "id": event.message.id,
-                "chat_id": event.chat_id,
-                "sender_id": event.sender_id,
-                "message_text": event.message.text,
-                "owner_id": me.id
-            })
-            await db_execute(query)
+            pool = get_pool()
+            await pool.execute(
+                """
+                INSERT INTO messages_log (id, chat_id, sender_id, message_text, owner_id)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                event.message.id,
+                event.chat_id,
+                event.sender_id,
+                event.message.text,
+                me.id,
+            )
 
     # رصد حذف
     @client.on(events.MessageDeleted)
@@ -48,16 +51,15 @@ def register_guard_handler(client):
         me = await event.client.get_me()
         LOG_CHAT_ID = -100123456789 
         
+        pool = get_pool()
         for msg_id in event.deleted_ids:
-            query = supabase.table("messages_log")\
-                .select("message_text")\
-                .eq("id", msg_id)\
-                .eq("owner_id", me.id)
-            
-            response = await db_execute(query)
+            row = await pool.fetchrow(
+                "SELECT message_text FROM messages_log WHERE id = $1 AND owner_id = $2",
+                msg_id, me.id,
+            )
                 
-            if response.data:
-                text = response.data[0]['message_text']
+            if row:
+                text = row["message_text"]
                 await client.send_message(LOG_CHAT_ID, f"🗑 **پیام حذف شده (در چت {event.chat_id}):**\n{text}")
 
     # رصد ویرایش (اصلاح شد: از MessageEdited استفاده شد)
@@ -68,9 +70,8 @@ def register_guard_handler(client):
             
         me = await event.client.get_me()
         # آپدیت متن جدید در دیتابیس
-        query = supabase.table("messages_log")\
-            .update({"message_text": event.message.text})\
-            .eq("id", event.message.id)\
-            .eq("owner_id", me.id)
-        
-        await db_execute(query)
+        pool = get_pool()
+        await pool.execute(
+            "UPDATE messages_log SET message_text = $1 WHERE id = $2 AND owner_id = $3",
+            event.message.text, event.message.id, me.id,
+        )

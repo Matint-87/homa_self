@@ -25,3 +25,13 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+DB_CONFIG = {
+    "user": "selfbot",
+    "password": "Matint_87",
+    "database": "selfbot_db",
+    "host": "localhost",
+    "port": 5432,
+    "min_size": 10,
+    "max_size": 50,  
+}

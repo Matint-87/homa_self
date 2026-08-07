@@ -2,8 +2,7 @@ import asyncio
 from telethon import events
 from telethon.errors import UserNotParticipantError
 from telethon.tl.functions.channels import GetParticipantRequest
-from utils import db_execute
-from config import supabase
+from utils import get_pool  # دسترسی به asyncpg pool مشترک پروژه
 
 SETTINGS_TABLE = "forced_membership_settings"
 CHANNELS_TABLE = "forced_membership_channels"
@@ -17,33 +16,54 @@ async def _get_my_id(client):
         _my_id_cache[key] = me.id
     return _my_id_cache[key]
 
-# ---------------- توابع دیتابیس (Supabase) ----------------
+# ---------------- توابع دیتابیس (Postgres) ----------------
 
 async def _get_enabled(user_id: int) -> bool:
-    query = supabase.table(SETTINGS_TABLE).select("enabled").eq("user_id", user_id).limit(1)
-    res = await db_execute(query)
-    return bool(res.data[0].get("enabled", False)) if res.data else False
+    pool = get_pool()
+    row = await pool.fetchrow(
+        f"SELECT enabled FROM {SETTINGS_TABLE} WHERE user_id = $1", user_id
+    )
+    return bool(row["enabled"]) if row else False
 
 async def _set_enabled(user_id: int, enabled: bool):
-    query = supabase.table(SETTINGS_TABLE).upsert({"user_id": user_id, "enabled": enabled})
-    await db_execute(query)
+    pool = get_pool()
+    await pool.execute(
+        f"""
+        INSERT INTO {SETTINGS_TABLE} (user_id, enabled)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id) DO UPDATE SET enabled = EXCLUDED.enabled
+        """,
+        user_id, enabled,
+    )
 
 async def _add_channel(user_id: int, channel: str):
-    query = supabase.table(CHANNELS_TABLE).upsert({"user_id": user_id, "channel": channel})
-    await db_execute(query)
+    pool = get_pool()
+    await pool.execute(
+        f"""
+        INSERT INTO {CHANNELS_TABLE} (user_id, channel)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id, channel) DO NOTHING
+        """,
+        user_id, channel,
+    )
 
 async def _remove_channel(user_id: int, channel: str):
-    query = supabase.table(CHANNELS_TABLE).delete().eq("user_id", user_id).eq("channel", channel)
-    await db_execute(query)
+    pool = get_pool()
+    await pool.execute(
+        f"DELETE FROM {CHANNELS_TABLE} WHERE user_id = $1 AND channel = $2",
+        user_id, channel,
+    )
 
 async def _list_channels(user_id: int):
-    query = supabase.table(CHANNELS_TABLE).select("channel").eq("user_id", user_id)
-    res = await db_execute(query)
-    return [row["channel"] for row in res.data] if res.data else []
+    pool = get_pool()
+    rows = await pool.fetch(
+        f"SELECT channel FROM {CHANNELS_TABLE} WHERE user_id = $1", user_id
+    )
+    return [row["channel"] for row in rows]
 
 async def _clear_channels(user_id: int):
-    query = supabase.table(CHANNELS_TABLE).delete().eq("user_id", user_id)
-    await db_execute(query)
+    pool = get_pool()
+    await pool.execute(f"DELETE FROM {CHANNELS_TABLE} WHERE user_id = $1", user_id)
 
 # ---------------- توابع کمکی ----------------
 

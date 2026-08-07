@@ -1,14 +1,11 @@
 import asyncio
 from telethon import events
 from telethon.tl.types import User
-from utils import db_execute
-from config import supabase
-
-# ایمپورت کردن توابع آنلاین سوپابیس از فایل utils
+from utils import get_pool  # دسترسی به asyncpg pool مشترک پروژه
 
 def register_mute_handlers(client):
     """
-    مدیریت فوق امنیتی و ایزوله بر پایه سوپابیس (Async)
+    مدیریت فوق امنیتی و ایزوله بر پایه Postgres (Async)
     """
     
     # متغیرهای داخلی کلاینت
@@ -20,9 +17,11 @@ def register_mute_handlers(client):
             me = await client.get_me()
             client.my_own_id = me.id
             # دریافت لیست از دیتابیس به صورت غیرهمزمان
-            query = supabase.table("muted_users").select("muted_id").eq("owner_id", client.my_own_id)
-            res = await db_execute(query)
-            client.muted_users_list = [row["muted_id"] for row in res.data] if res.data else []
+            pool = get_pool()
+            rows = await pool.fetch(
+                "SELECT muted_id FROM muted_users WHERE owner_id = $1", client.my_own_id
+            )
+            client.muted_users_list = [row["muted_id"] for row in rows]
         return client.my_own_id
 
     # هندلر پاک کردن آنی پیام
@@ -46,8 +45,11 @@ def register_mute_handlers(client):
         user_id = reply_msg.sender_id
         
         if user_id not in client.muted_users_list:
-            query = supabase.table("muted_users").insert({"owner_id": client.my_own_id, "muted_id": user_id})
-            await db_execute(query)
+            pool = get_pool()
+            await pool.execute(
+                "INSERT INTO muted_users (owner_id, muted_id) VALUES ($1, $2)",
+                client.my_own_id, user_id,
+            )
             client.muted_users_list.append(user_id)
             await event.edit("🤐 کاربر به لیست سکوت اضافه شد.")
 
@@ -58,8 +60,11 @@ def register_mute_handlers(client):
         user_id = int(event.pattern_match.group(1)) if event.pattern_match.group(1) else (await event.get_reply_message()).sender_id
         
         if user_id in client.muted_users_list:
-            query = supabase.table("muted_users").delete().eq("owner_id", client.my_own_id).eq("muted_id", user_id)
-            await db_execute(query)
+            pool = get_pool()
+            await pool.execute(
+                "DELETE FROM muted_users WHERE owner_id = $1 AND muted_id = $2",
+                client.my_own_id, user_id,
+            )
             client.muted_users_list.remove(user_id)
             await event.edit(f"🔊 کاربر <code>{user_id}</code> حذف شد.", parse_mode="html")
 
@@ -85,7 +90,9 @@ def register_mute_handlers(client):
     @client.on(events.NewMessage(outgoing=True, pattern=r'^\*پاکسازی سکوت$'))
     async def clear_mute_list(event):
         await _ensure_loaded()
-        query = supabase.table("muted_users").delete().eq("owner_id", client.my_own_id)
-        await db_execute(query)
+        pool = get_pool()
+        await pool.execute(
+            "DELETE FROM muted_users WHERE owner_id = $1", client.my_own_id
+        )
         client.muted_users_list = []
         await event.edit("🧹 لیست سکوت پاکسازی شد.")

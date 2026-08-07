@@ -1,31 +1,36 @@
 import asyncio
 from telethon import events
-from config import supabase
-from utils import db_execute  # ایمپورت تابع مدیریت ترد
+from utils import get_pool  # دسترسی به asyncpg pool مشترک پروژه
 
 # =====================================================================
-# 🗄️ بخش اول: توابع دیتابیس (Supabase) - نسخه Async
+# 🗄️ بخش اول: توابع دیتابیس (Postgres) - نسخه Async
 # =====================================================================
 
 async def get_user_chat_action(user_id: int) -> str:
     try:
-        # ساخت کوئری
-        query = supabase.table("user_chat_actions").select("action").eq("user_id", user_id)
-        # اجرای غیرهمزمان
-        res = await db_execute(query)
-        
-        if res.data:
-            return res.data[0]["action"]
+        pool = get_pool()
+        row = await pool.fetchrow(
+            "SELECT action FROM user_chat_actions WHERE user_id = $1",
+            user_id,
+        )
+        if row:
+            return row["action"]
     except Exception as e:
         print(f"❌ Error fetching chat action: {e}")
     return "none"
 
 async def set_user_chat_action(user_id: int, action: str):
     try:
-        # ساخت کوئری
-        query = supabase.table("user_chat_actions").upsert({"user_id": user_id, "action": action})
-        # اجرای غیرهمزمان
-        await db_execute(query)
+        pool = get_pool()
+        await pool.execute(
+            """
+            INSERT INTO user_chat_actions (user_id, action)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) DO UPDATE SET action = EXCLUDED.action
+            """,
+            user_id,
+            action,
+        )
     except Exception as e:
         print(f"❌ Error saving chat action: {e}")
 

@@ -3,8 +3,7 @@ import asyncio
 from telethon import events
 from telethon.tl.functions.messages import GetDiscussionMessageRequest
 from telethon.tl.types import Channel
-from config import supabase
-from utils import db_execute  # اجرای غیرهمزمان کوئری‌های sync سوپابیس در thread pool اختصاصی
+from utils import get_pool  # دسترسی به asyncpg pool مشترک پروژه
 
 TABLE = "autocomment_settings"
 DEFAULT_COMMENT_TEXT = "اولین"
@@ -23,9 +22,11 @@ async def _get_my_id(client):
 
 async def _get_user_settings(user_id: int):
     try:
-        query = supabase.table(TABLE).select("*").eq("user_id", user_id).limit(1)
-        res = await db_execute(query)
-        row = res.data[0] if res.data else None
+        pool = get_pool()
+        row = await pool.fetchrow(
+            f"SELECT enabled, comment_text FROM {TABLE} WHERE user_id = $1",
+            user_id,
+        )
     except Exception as e:
         print(f"Error fetching autocomment settings for {user_id}: {e}")
         row = None
@@ -33,16 +34,29 @@ async def _get_user_settings(user_id: int):
     if row is None:
         return {"enabled": False, "comment_text": DEFAULT_COMMENT_TEXT}
     return {
-        "enabled": bool(row.get("enabled", False)),
-        "comment_text": row.get("comment_text") or DEFAULT_COMMENT_TEXT,
+        "enabled": bool(row["enabled"]),
+        "comment_text": row["comment_text"] or DEFAULT_COMMENT_TEXT,
     }
 
 
 async def _update_user_settings(user_id: int, **updates):
+    if not updates:
+        return
     try:
-        payload = {"user_id": user_id, **updates}
-        query = supabase.table(TABLE).upsert(payload, on_conflict="user_id")
-        await db_execute(query)
+        pool = get_pool()
+
+        # ساخت پویای بخش SET بر اساس فیلدهایی که پاس داده شدن
+        columns = ["user_id"] + list(updates.keys())
+        values = [user_id] + list(updates.values())
+        placeholders = ", ".join(f"${i + 1}" for i in range(len(values)))
+        update_clause = ", ".join(f"{col} = EXCLUDED.{col}" for col in updates.keys())
+
+        query = f"""
+            INSERT INTO {TABLE} ({", ".join(columns)})
+            VALUES ({placeholders})
+            ON CONFLICT (user_id) DO UPDATE SET {update_clause}
+        """
+        await pool.execute(query, *values)
     except Exception as e:
         print(f"Error updating autocomment settings for {user_id}: {e}")
 

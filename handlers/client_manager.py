@@ -2,23 +2,15 @@ import os
 import asyncio
 from telethon import TelegramClient, events
 from config import API_HASH, API_ID
-from config import supabase
-from utils import db_execute  # ایمپورت تابع مدیریت ترد
+from utils import get_pool  # دسترسی به asyncpg pool مشترک پروژه
 
-# دیکشنری‌ها برای مدیریت کلاینت‌ها در وضعیت زنده
 clients = {}
 login_data = {}
 
-# 🚦 وضعیت لحظه‌ای مجاز بودن هر کاربر (در حافظه، بدون هزینه‌ی دیتابیس در هر پیام)
-# user_id -> bool
 user_status = {}
 
-# فاصله‌ی زمانی چک کردن موجودی از دیتابیس (ثانیه)
-# روی سرور ۲ گیگ CPU / ۴ گیگ RAM با ۱۰۰۰ کاربر، مقدار پایین‌تر فشار غیرضروری
-# به دیتابیس و event loop وارد می‌کنه؛ ۲۰ ثانیه تعادل خوبیه بین سرعت واکنش و مصرف منابع.
 STATUS_POLL_INTERVAL = 20
 
-# سقف تعداد کانکشن هم‌زمان تلگرام (هم برای لود اولیه، هم برای شارژهای گروهی در حین اجرا)
 CONNECTION_SEMAPHORE_LIMIT = 50
 _connection_semaphore = asyncio.Semaphore(CONNECTION_SEMAPHORE_LIMIT)
 
@@ -86,7 +78,7 @@ def activate_client(client: TelegramClient, user_id: int):
     """
     clients[user_id] = client
     user_status[user_id] = True
-    register_guard(client, user_id)   # همیشه قبل از register_handlers
+    register_guard(client, user_id)   
     register_handlers(client)
 
 
@@ -94,6 +86,18 @@ def deactivate_client(user_id: int):
     """پاک‌سازی وضعیت در حافظه هنگام خاموش/حذف شدن کلاینت"""
     user_status.pop(user_id, None)
     clients.pop(user_id, None)
+
+
+async def _mark_user_inactive(user_id: int):
+    """یک نقطه‌ی مشترک برای غیرفعال کردن کاربر در دیتابیس (users_diamonds.is_active = False)"""
+    try:
+        pool = get_pool()
+        await pool.execute(
+            "UPDATE users_diamonds SET is_active = FALSE WHERE user_id = $1",
+            user_id,
+        )
+    except Exception:
+        pass
 
 
 def register_handlers(client: TelegramClient):
@@ -143,7 +147,7 @@ def register_handlers(client: TelegramClient):
         from handlers.watter_handler import register_watter_handler
         from handlers.password_handler import register_password_handler
         from handlers.profile_handler import register_profile_handler 
-        from handlers.tabchi import register_tabchi_handler        
+        from handlers.tabchi import register_tabchi_handler
         register_admin_handlers(client)
         register_chat_guard(client)
         register_clock(client)
@@ -217,31 +221,19 @@ async def init_single_client(user_id: int, semaphore: asyncio.Semaphore = None):
                         print(f"⚠️ کلاینت کاربر {user_id} قطع شد: {loop_err}")
                     finally:
                         deactivate_client(user_id)
-                        try:
-                            query = supabase.table("users_diamonds").update({"is_active": False}).eq("user_id", user_id)
-                            await db_execute(query)
-                            print(f"📉 وضعیت کاربر {user_id} غیرفعال شد.")
-                        except Exception:
-                            pass
+                        await _mark_user_inactive(user_id)
+                        print(f"📉 وضعیت کاربر {user_id} غیرفعال شد.")
 
                 asyncio.create_task(safe_run())
                 print(f"🟢 سلف‌بات کاربر {user_id} با موفقیت لود شد.")
             else:
                 await client.disconnect()
                 print(f"🔴 سشن کاربر {user_id} منقضی شده بود.")
-                try:
-                    query = supabase.table("users_diamonds").update({"is_active": False}).eq("user_id", user_id)
-                    await db_execute(query)
-                except Exception:
-                    pass
+                await _mark_user_inactive(user_id)
 
         except Exception as e:
             print(f"❌ خطا در لود سشن {user_id}: {e}")
-            try:
-                query = supabase.table("users_diamonds").update({"is_active": False}).eq("user_id", user_id)
-                await db_execute(query)
-            except Exception:
-                pass
+            await _mark_user_inactive(user_id)
 
     await asyncio.sleep(0.1)
 
@@ -253,11 +245,11 @@ async def load_existing_sessions():
 
     valid_users = set()
     try:
-        query = supabase.table("users_diamonds").select("user_id").gt("diamonds", 0).eq("is_active", True)
-        response = await db_execute(query)
-
-        if response.data:
-            valid_users = {int(row["user_id"]) for row in response.data}
+        pool = get_pool()
+        rows = await pool.fetch(
+            "SELECT user_id FROM users_diamonds WHERE diamonds > 0 AND is_active = TRUE"
+        )
+        valid_users = {int(row["user_id"]) for row in rows}
         print(f"💰 تعداد {len(valid_users)} کاربر مجاز دریافت شد.")
     except Exception as db_error:
         print(f"⚠️ خطای دیتابیس در خواندن اطلاعات: {db_error}")
@@ -298,13 +290,14 @@ async def status_watcher():
     """
     while True:
         try:
-            query = supabase.table("users_diamonds").select("user_id, diamonds, is_active")
-            response = await db_execute(query)
-            rows = response.data or []
+            pool = get_pool()
+            rows = await pool.fetch(
+                "SELECT user_id, diamonds, is_active FROM users_diamonds"
+            )
 
             for row in rows:
                 user_id = int(row["user_id"])
-                allowed = bool((row.get("diamonds") or 0) > 0 and row.get("is_active"))
+                allowed = bool((row["diamonds"] or 0) > 0 and row["is_active"])
 
                 if user_id in clients:
                     # کلاینت زنده‌ست؛ فقط فلگ آپدیت می‌شه -> اثر فوری روی گارد

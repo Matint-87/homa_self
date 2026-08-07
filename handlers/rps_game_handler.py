@@ -2,8 +2,7 @@ import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters
 from telegram.error import BadRequest
-from config import supabase
-from utils import db_execute  # اجرای غیرهمزمان کوئری‌های sync سوپابیس در thread pool
+from utils import get_pool  # دسترسی به asyncpg pool مشترک پروژه
 
 ACTIVE_RPS_GAMES = {}
 CHOICE_EMOJIS = {"rock": "✊ سنگ", "paper": "✋ کاغذ", "scissors": "✌️ قیچی"}
@@ -56,9 +55,11 @@ def get_mention(user) -> str:
 
 async def get_user_diamonds(user_id: int) -> int:
     try:
-        query = supabase.table("users_diamonds").select("diamonds").eq("user_id", user_id)
-        res = await db_execute(query)
-        return res.data[0]["diamonds"] if res.data else 0
+        pool = get_pool()
+        value = await pool.fetchval(
+            "SELECT diamonds FROM users_diamonds WHERE user_id = $1", user_id
+        )
+        return value or 0
     except Exception as e:
         print(f"Error getting diamonds for {user_id}: {e}")
         return 0
@@ -67,19 +68,16 @@ async def get_user_diamonds(user_id: int) -> int:
 async def update_diamonds(user_id: int, amount: int):
     """
     ✅ نسخه اتمیک: به‌جای «بخون، جمع کن، بنویس» (که race condition داشت)،
-    از تابع دیتابیسی increment_diamonds استفاده می‌کند که خودِ Postgres
-    به‌صورت اتمیک مقدار را جمع/کم می‌کند. اگر دو عملیات همزمان روی یک
-    کاربر اجرا شوند، دیگر همدیگر را overwrite نمی‌کنند.
-
-    نکته: اگر تابع increment_diamonds را دقیقاً روی جدول users_diamonds
-    نساخته‌ای، SQL موردنیاز را در پاسخ متنی (پایین صفحه) پیدا می‌کنی.
+    مستقیماً یک دستور UPDATE اتمیک روی Postgres اجرا می‌شود
+    (diamonds = diamonds + amount) که خودِ دیتابیس این عملیات را
+    به‌صورت یکپارچه و بدون overwrite شدن توسط عملیات همزمان انجام می‌دهد.
     """
     try:
-        query = supabase.rpc(
-            "increment_diamonds",
-            {"p_user_id": user_id, "p_amount": amount}
+        pool = get_pool()
+        await pool.execute(
+            "UPDATE users_diamonds SET diamonds = diamonds + $1 WHERE user_id = $2",
+            amount, user_id,
         )
-        await db_execute(query)
     except Exception as e:
         print(f"Error updating diamonds for {user_id}: {e}")
 
@@ -88,19 +86,21 @@ async def update_diamonds(user_id: int, amount: int):
 async def add_win_to_ranking(user_id: int, display_name: str):
     """ذخیره برد به همراه زیباترین نام در دسترس کاربر"""
     try:
-        query = supabase.table("rps_rankings").select("wins_count").eq("user_id", user_id)
-        res = await db_execute(query)
-        if res.data:
-            new_wins = res.data[0]["wins_count"] + 1
-            query = supabase.table("rps_rankings").update(
-                {"wins_count": new_wins, "username": display_name}
-            ).eq("user_id", user_id)
-            await db_execute(query)
-        else:
-            query = supabase.table("rps_rankings").insert(
-                {"user_id": user_id, "username": display_name, "wins_count": 1}
+        pool = get_pool()
+        row = await pool.fetchrow(
+            "SELECT wins_count FROM rps_rankings WHERE user_id = $1", user_id
+        )
+        if row:
+            new_wins = row["wins_count"] + 1
+            await pool.execute(
+                "UPDATE rps_rankings SET wins_count = $1, username = $2 WHERE user_id = $3",
+                new_wins, display_name, user_id,
             )
-            await db_execute(query)
+        else:
+            await pool.execute(
+                "INSERT INTO rps_rankings (user_id, username, wins_count) VALUES ($1, $2, 1)",
+                user_id, display_name,
+            )
     except Exception as e:
         print(f"Error updating ranking for {user_id}: {e}")
 
@@ -293,14 +293,16 @@ async def handle_rps_clicks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_rps_ranking(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        query = supabase.table("rps_rankings").select("*").order("wins_count", desc=True).limit(10)
-        res = await db_execute(query)
-        if not res.data:
+        pool = get_pool()
+        rows = await pool.fetch(
+            "SELECT * FROM rps_rankings ORDER BY wins_count DESC LIMIT 10"
+        )
+        if not rows:
             await update.message.reply_text("📭 هنوز بردی در سیستم ثبت نشده است.")
             return
 
         lines = ["🏆 <b>برترین بازیکنان سنگ، کاغذ، قیچی</b> 🏆\n"]
-        for i, row in enumerate(res.data, 1):
+        for i, row in enumerate(rows, 1):
             lines.append(f"🏅 {i}. {row['username']} (<code>{row['user_id']}</code>) ➔ <b>{row['wins_count']} برد</b>")
 
         await update.message.reply_text("\n".join(lines), parse_mode="HTML")
