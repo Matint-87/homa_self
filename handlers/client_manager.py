@@ -142,7 +142,7 @@ def register_handlers(client: TelegramClient):
         from handlers.relations_handlers import register_reply_handlers
         from handlers.word_filter import register_word_filter
         from handlers.admin_game_handler import register_admin_handlers
-        from handlers.variz_handler import register_variz_handler
+        # from handlers.variz_handler import register_variz_handler
         from handlers.ocr_handler import register_ocr_handler
         from handlers.watter_handler import register_watter_handler
         from handlers.password_handler import register_password_handler
@@ -185,7 +185,7 @@ def register_handlers(client: TelegramClient):
         register_game_cheat_handler(client)
         register_download_handler(client)
         register_autocomment_handler(client)
-        register_variz_handler(client)
+        # register_variz_handler(client)
         register_ocr_handler(client)
         register_watter_handler(client)
         register_password_handler(client)
