@@ -146,7 +146,7 @@ def register_admin_handlers(bot):
         try:
             # گرفتن مقدار عددی از پترن
             amount = int(event.pattern_match.group(1))
-            
+
             # بررسی اینکه حتما روی پیام کسی ریپلای شده باشد
             reply = await event.get_reply_message()
             if not reply:
@@ -200,10 +200,74 @@ def register_admin_handlers(bot):
                 f"💵 <b>معادل تومان:</b> {new_target_balance * 35:,} تومان",
                 parse_mode='html'
             )
-            
+
         except Exception as e:
             print(f"Error in telethon transfer: {e}")
             try:
                 await event.edit("⚠️ خطایی در انجام تراکنش رخ داد.")
             except:
                 await event.reply("⚠️ خطایی در انجام تراکنش رخ داد.")
+
+    # 🏅 ۴. دستور نمایش برترین لول‌ها (فقط ادمین): *برترین لول
+    @bot.on(events.NewMessage(outgoing=True, pattern=r'^\*برترین لول$'))
+    async def show_top_levels(event):
+        if not is_admin(event.sender_id):
+            return
+
+        try:
+            pool = get_pool()
+            rows = await pool.fetch(
+                """
+                SELECT * FROM users_diamonds
+                ORDER BY level DESC, diamonds DESC
+                LIMIT 15
+                """
+            )
+
+            if not rows:
+                await event.edit("📭 هنوز هیچ اطلاعاتی ثبت نشده است.")
+                return
+
+            lines = ["🏅 **جدول ۱۵ نفر برتر بر اساس لول** 🏅\n"]
+            for i, row in enumerate(rows, 1):
+                name = row.get('username') or f"کاربر ({row['user_id']})"
+                level = row.get('level', 0) or 0
+                lines.append(f"🔹 {i}. {name} (`{row['user_id']}`) ➔ **لول {level}**")
+
+            await event.edit("\n".join(lines))
+
+        except Exception as e:
+            await event.edit("❌ خطا در دریافت اطلاعات لول از دیتابیس!")
+            print(f"Error in top levels: {e}")
+
+    # 💰 ۵. دستور نمایش پولدارترین کاربرا (فقط ادمین): *پولدارا
+    @bot.on(events.NewMessage(outgoing=True, pattern=r'^\*پولدارا$'))
+    async def show_richest_users(event):
+        if not is_admin(event.sender_id):
+            return
+
+        try:
+            pool = get_pool()
+            rows = await pool.fetch(
+                """
+                SELECT * FROM users_diamonds
+                ORDER BY diamonds DESC
+                LIMIT 15
+                """
+            )
+
+            if not rows:
+                await event.edit("📭 هنوز هیچ اطلاعاتی ثبت نشده است.")
+                return
+
+            lines = ["💰 **جدول ۱۵ نفر پولدارترین کاربرا** 💰\n"]
+            for i, row in enumerate(rows, 1):
+                name = row.get('username') or f"کاربر ({row['user_id']})"
+                diamonds = row.get('diamonds', 0) or 0
+                lines.append(f"💎 {i}. {name} (`{row['user_id']}`) ➔ **{diamonds:,} طلا**")
+
+            await event.edit("\n".join(lines))
+
+        except Exception as e:
+            await event.edit("❌ خطا در دریافت اطلاعات طلا از دیتابیس!")
+            print(f"Error in richest users: {e}")
