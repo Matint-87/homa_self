@@ -108,8 +108,8 @@ async def request_level_up(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ تایید", callback_data=f"lvlup_yes_{user_id}_{current_level}", style="success"),
-            InlineKeyboardButton("❌ لغو", callback_data=f"lvlup_no_{user_id}", style="danger")
+            InlineKeyboardButton(" تایید", callback_data=f"lvlup_yes_{user_id}_{current_level}", style="success"),
+            InlineKeyboardButton(" لغو", callback_data=f"lvlup_no_{user_id}", style="danger")
         ]
     ])
 
