@@ -108,8 +108,8 @@ async def request_level_up(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ تایید", callback_data=f"lvlup_yes_{user_id}_{current_level}"),
-            InlineKeyboardButton("❌ لغو", callback_data=f"lvlup_no_{user_id}")
+            InlineKeyboardButton("✅ تایید", callback_data=f"lvlup_yes_{user_id}_{current_level}", style="success"),
+            InlineKeyboardButton("❌ لغو", callback_data=f"lvlup_no_{user_id}", style="danger")
         ]
     ])
 
@@ -183,6 +183,6 @@ async def handle_levelup_clicks(update: Update, context: ContextTypes.DEFAULT_TY
         await safe_answer("لول شما ارتقا پیدا کرد! 🎉")
 
 
-def register_levelup_handlers(app):
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\ارتقای لول$'), request_level_up))
+def register_levelup_handler(app):
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\*ارتقای لول$'), request_level_up))
     app.add_handler(CallbackQueryHandler(handle_levelup_clicks, pattern=r'^lvlup_.*'))

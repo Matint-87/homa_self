@@ -29,7 +29,7 @@ from handlers.auth_handler import (
     handle_activation_payment,
     get_phone, handle_code_calculator_clicks, get_password
 )
-from handlers.leveluphandler import register_levelup_handlers
+from handlers.leveluphandler import register_levelup_handler
 from handlers.dice_game import (
     handle_balance_request,
     handle_transfer_request,
@@ -244,7 +244,7 @@ async def start_dual_bots():
     register_rps_handlers(main_app)
     register_dice_handlers(main_app)
     register_xo_handlers(main_app)
-    register_levelup_handlers(main_app)
+    register_levelup_handler(main_app)
     # فعال‌سازی جاب (هر یک ساعت)
     main_app.job_queue.run_repeating(deduct_diamonds_job, interval=3600, first=60)
 
