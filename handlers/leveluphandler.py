@@ -1,41 +1,36 @@
-from telethon import events, Button
-from utils import get_pool  # جایگزین ایمپورت مستقیم pool برای هماهنگی با دیتابیس لوکال VPS
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters
+from telegram.error import BadRequest
+from utils import get_pool  # دسترسی به asyncpg pool مشترک پروژه
 
 # ============== توابع دیتابیس مربوط به طلا ==============
 
 async def get_user_diamonds(user_id: int) -> int:
     try:
         pool = get_pool()
-        row = await pool.fetchrow(
-            "SELECT diamonds FROM users_diamonds WHERE user_id = $1",
-            user_id,
+        value = await pool.fetchval(
+            "SELECT diamonds FROM users_diamonds WHERE user_id = $1", user_id
         )
-        return row["diamonds"] if row else 0
+        return value or 0
     except Exception as e:
         print(f"Error getting diamonds for {user_id}: {e}")
         return 0
 
 
 async def update_diamonds(user_id: int, amount: int):
+    """
+    ✅ نسخه اتمیک: مستقیماً یک دستور UPDATE اتمیک روی Postgres اجرا می‌شود
+    (diamonds = diamonds + amount) که خودِ دیتابیس این عملیات را به‌صورت
+    یکپارچه و بدون overwrite شدن توسط عملیات همزمان انجام می‌دهد.
+    """
     try:
         pool = get_pool()
-        current = await get_user_diamonds(user_id)
-        new_balance = max(0, current + amount)
-        # upsert: اگه رکورد بود آپدیت میشه، نبود ساخته میشه
         await pool.execute(
-            """
-            INSERT INTO users_diamonds (user_id, diamonds)
-            VALUES ($1, $2)
-            ON CONFLICT (user_id)
-            DO UPDATE SET diamonds = EXCLUDED.diamonds
-            """,
-            user_id,
-            new_balance,
+            "UPDATE users_diamonds SET diamonds = diamonds + $1 WHERE user_id = $2",
+            amount, user_id,
         )
-        return new_balance
     except Exception as e:
         print(f"Error updating diamonds for {user_id}: {e}")
-        return None
 
 
 # ============== توابع دیتابیس مربوط به لول ==============
@@ -48,32 +43,36 @@ async def update_diamonds(user_id: int, amount: int):
 async def get_user_level(user_id: int) -> int:
     try:
         pool = get_pool()
-        row = await pool.fetchrow(
-            "SELECT level FROM users_diamonds WHERE user_id = $1",
-            user_id,
+        value = await pool.fetchval(
+            "SELECT level FROM users_diamonds WHERE user_id = $1", user_id
         )
-        return row["level"] if row and row["level"] is not None else 0
+        return value or 0
     except Exception as e:
         print(f"Error getting level for {user_id}: {e}")
         return 0
 
 
-async def set_user_level(user_id: int, new_level: int):
+async def increment_user_level(user_id: int):
+    """
+    ✅ نسخه اتمیک: با یک INSERT ... ON CONFLICT ... RETURNING، لول کاربر
+    یک واحد افزایش پیدا می‌کنه (یا اگه رکوردی نبود، با لول 1 ساخته میشه)
+    و مقدار جدید همون‌جا برگردونده میشه؛ دقیقاً مثل update_diamonds اتمیکه.
+    """
     try:
         pool = get_pool()
-        await pool.execute(
+        new_level = await pool.fetchval(
             """
             INSERT INTO users_diamonds (user_id, level)
-            VALUES ($1, $2)
+            VALUES ($1, 1)
             ON CONFLICT (user_id)
-            DO UPDATE SET level = EXCLUDED.level
+            DO UPDATE SET level = users_diamonds.level + 1
+            RETURNING level
             """,
             user_id,
-            new_level,
         )
         return new_level
     except Exception as e:
-        print(f"Error setting level for {user_id}: {e}")
+        print(f"Error incrementing level for {user_id}: {e}")
         return None
 
 
@@ -88,100 +87,102 @@ def get_upgrade_cost(current_level: int) -> int:
     return (current_level + 1) * 500
 
 
-def register_levelup_handler(bot):
-    """ثبت هندلر ارتقای لول - همه کاربرا می‌تونن ازش استفاده کنن"""
+# ⬆️ شروع درخواست ارتقا (پیام + دکمه تایید/لغو)
+async def request_level_up(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    user = update.effective_user
+    user_id = user.id
 
-    # ⬆️ دستور ارتقای لول با دکمه تایید/لغو: *ارتقای لول
-    @bot.on(events.NewMessage(pattern=r'^\*ارتقای لول$'))
-    async def request_level_up(event):
+    current_level = await get_user_level(user_id)
+    current_diamonds = await get_user_diamonds(user_id)
+    cost = get_upgrade_cost(current_level)
+
+    text = (
+        "⬆️ <b>ارتقای لول</b>\n\n"
+        f"🔹 <b>لول فعلی شما:</b> {current_level}\n"
+        f"🔹 <b>لول بعد از ارتقا:</b> {current_level + 1}\n"
+        f"💰 <b>موجودی فعلی:</b> <code>{current_diamonds}</code> طلا\n"
+        f"💵 <b>هزینه ارتقا:</b> <code>{cost}</code> طلا\n\n"
+        "آیا مایل به ارتقا هستید؟"
+    )
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ تایید", callback_data=f"lvlup_yes_{user_id}_{current_level}"),
+            InlineKeyboardButton("❌ لغو", callback_data=f"lvlup_no_{user_id}")
+        ]
+    ])
+
+    await message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# 🎛️ مدیریت کلیک روی دکمه‌های تایید/لغو ارتقای لول
+async def handle_levelup_clicks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    clicker = query.from_user
+    clicker_id = clicker.id
+    data = query.data
+
+    async def safe_answer(text, show_alert=False):
         try:
-            user_id = event.sender_id
+            await query.answer(text, show_alert=show_alert)
+        except BadRequest as e:
+            if "Query is too old" in str(e):
+                print("📌 [LevelUp] کالبک قدیمی بود.")
+            else:
+                raise e
 
-            current_level = await get_user_level(user_id)
-            current_diamonds = await get_user_diamonds(user_id)
-            cost = get_upgrade_cost(current_level)
+    if data.startswith("lvlup_no_"):
+        owner_id = int(data.replace("lvlup_no_", ""))
 
-            text = (
-                f"⬆️ <b>ارتقای لول</b>\n\n"
-                f"🔹 لول فعلی شما: <b>{current_level}</b>\n"
-                f"🔹 لول بعد از ارتقا: <b>{current_level + 1}</b>\n"
-                f"💰 موجودی فعلی: <b>{current_diamonds:,}</b> طلا\n"
-                f"💵 هزینه ارتقا: <b>{cost:,}</b> طلا\n\n"
-                f"آیا مایل به ارتقا هستید؟"
+        if clicker_id != owner_id:
+            await safe_answer("⛔️ این دکمه مخصوص شما نیست!", show_alert=True)
+            return
+
+        await query.edit_message_text("❌ <b>ارتقای لول لغو شد.</b>", parse_mode="HTML")
+        await safe_answer("لغو شد.")
+        return
+
+    elif data.startswith("lvlup_yes_"):
+        parts = data.split("_")
+        # فرمت: lvlup_yes_{user_id}_{level}
+        owner_id = int(parts[2])
+
+        if clicker_id != owner_id:
+            await safe_answer("⛔️ این دکمه مخصوص شما نیست!", show_alert=True)
+            return
+
+        # همیشه مقادیر رو تازه از دیتابیس می‌خونیم تا اگه بین ارسال پیام و کلیک دکمه
+        # چیزی تغییر کرده باشه (مثلاً موجودی کم شده)، جلوش گرفته بشه
+        fresh_level = await get_user_level(owner_id)
+        fresh_diamonds = await get_user_diamonds(owner_id)
+        cost = get_upgrade_cost(fresh_level)
+
+        if fresh_diamonds < cost:
+            await safe_answer(
+                f"❌ موجودی کافی نیست! شما {fresh_diamonds} طلا دارید و {cost} طلا لازمه.",
+                show_alert=True,
             )
+            return
 
-            buttons = [
-                [
-                    Button.inline("✅ تایید", data=f"lvlup_yes_{user_id}_{current_level}"),
-                    Button.inline("❌ لغو", data=f"lvlup_no_{user_id}"),
-                ]
-            ]
+        # 🔒 اول طلا کسر میشه، بعد لول اضافه میشه (هر دو اتمیک)
+        await update_diamonds(owner_id, -cost)
+        new_level = await increment_user_level(owner_id)
+        new_balance = await get_user_diamonds(owner_id)
 
-            # چون این دستور ممکنه توسط هر کاربری فرستاده بشه (نه فقط خود اکانت سلف‌بات)،
-            # با ریپلای جواب می‌دیم نه ادیت (چون پیام مال کاربر دیگه‌ست و قابل ادیت نیست)
-            await event.reply(text, buttons=buttons, parse_mode='html')
-
-        except Exception as e:
-            print(f"Error in request_level_up: {e}")
-            try:
-                await event.reply("⚠️ خطایی در پردازش درخواست ارتقا رخ داد.")
-            except:
-                pass
-
-    # هندلر کلیک روی دکمه‌های تایید/لغو ارتقای لول
-    @bot.on(events.CallbackQuery(pattern=rb'^lvlup_(yes|no)_(\-?\d+)(?:_(\d+))?$'))
-    async def handle_level_up_callback(event):
         try:
-            action = event.pattern_match.group(1).decode()
-            owner_id = int(event.pattern_match.group(2))
-            clicker_id = event.sender_id
-
-            # فقط کسی که خودش درخواست ارتقا داده حق زدن دکمه رو داره
-            if clicker_id != owner_id:
-                await event.answer("⛔️ این دکمه مخصوص شما نیست!", alert=True)
-                return
-
-            if action == "no":
-                await event.edit("❌ ارتقای لول لغو شد.")
-                await event.answer("لغو شد.")
-                return
-
-            # action == "yes"
-            # همیشه مقادیر رو تازه از دیتابیس می‌خونیم تا از race condition جلوگیری بشه
-            fresh_level = await get_user_level(owner_id)
-            fresh_diamonds = await get_user_diamonds(owner_id)
-            cost = get_upgrade_cost(fresh_level)
-
-            if fresh_diamonds < cost:
-                await event.answer(
-                    f"موجودی کافی نیست! شما {fresh_diamonds:,} طلا دارید و {cost:,} طلا لازمه.",
-                    alert=True,
-                )
-                return
-
-            new_balance = await update_diamonds(owner_id, -cost)
-            if new_balance is None:
-                await event.answer("❌ خطا در کسر طلا، دوباره امتحان کنید.", alert=True)
-                return
-
-            new_level = await set_user_level(owner_id, fresh_level + 1)
-            if new_level is None:
-                # اگه ثبت لول جدید خطا داد، طلای کسر شده رو برگردون
-                await update_diamonds(owner_id, cost)
-                await event.answer("❌ خطا در ثبت لول جدید، دوباره امتحان کنید.", alert=True)
-                return
-
-            await event.edit(
-                f"✅ <b>ارتقا با موفقیت انجام شد!</b>\n\n"
-                f"🔹 لول جدید شما: <b>{new_level}</b>\n"
-                f"💰 موجودی باقی‌مانده: <b>{new_balance:,}</b> طلا",
-                parse_mode='html'
+            await query.edit_message_text(
+                "✅ <b>ارتقا با موفقیت انجام شد!</b>\n\n"
+                f"🔹 <b>لول جدید شما:</b> {new_level}\n"
+                f"💰 <b>موجودی باقی‌مانده:</b> <code>{new_balance}</code> طلا",
+                parse_mode="HTML"
             )
-            await event.answer("لول شما ارتقا پیدا کرد! 🎉")
+        except BadRequest as e:
+            print(f"Error in level up result: {e}")
 
-        except Exception as e:
-            print(f"Error in handle_level_up_callback: {e}")
-            try:
-                await event.answer("⚠️ خطایی رخ داد.", alert=True)
-            except:
-                pass
+        await safe_answer("لول شما ارتقا پیدا کرد! 🎉")
+
+
+def register_levelup_handlers(app):
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\ارتقای لول$'), request_level_up))
+    app.add_handler(CallbackQueryHandler(handle_levelup_clicks, pattern=r'^lvlup_.*'))
