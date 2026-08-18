@@ -18,7 +18,6 @@ def get_user_mention(user) -> str:
     return f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
 
 
-# =========================================
 # HANDLE BALANCE REQUEST
 # =========================================
 async def handle_balance_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
