@@ -44,6 +44,24 @@ async def update_diamonds(user_id: int, amount: int):
         return None
 
 
+async def get_display_mention(bot, user_id: int) -> str:
+    """
+    یه اسم قابل کلیک برای کاربر می‌سازه که به آیدی عددی خودش لینک شده
+    (tg://user?id=...)، پس همیشه کار می‌کنه حتی اگه یوزرنیم عوض/حذف بشه.
+    اولویت نمایش: یوزرنیم فعلی -> نام فعلی -> در نهایت فقط آیدی.
+    """
+    try:
+        target_user = await bot.get_entity(user_id)
+        if target_user.username:
+            display = f"@{target_user.username}"
+        else:
+            display = target_user.first_name or f"کاربر {user_id}"
+    except Exception:
+        display = f"کاربر {user_id}"
+
+    return f"[{display}](tg://user?id={user_id})"
+
+
 def register_admin_handlers(bot):
     """ثبت هندلرهای سلف‌بات (با قابلیت ادیت روی پیام ادمین)"""
 
@@ -69,9 +87,9 @@ def register_admin_handlers(bot):
 
             lines = ["🏆 **جدول ۱۵ نفر برتر بازی سنگ، کاغذ، قیچی** 🏆\n"]
             for i, row in enumerate(rows, 1):
-                name = row.get('username') or 'کاربر ناشناس'
+                mention = await get_display_mention(bot, row['user_id'])
                 wins = row.get('wins_count', 0)
-                lines.append(f"🏅 {i}. {name} (`{row['user_id']}`) ➔ **{wins} برد**")
+                lines.append(f"🏅 {i}. {mention} ➔ **{wins} برد**")
 
             await event.edit("\n".join(lines))
 
@@ -230,9 +248,9 @@ def register_admin_handlers(bot):
 
             lines = ["🏅 **جدول ۱۵ نفر برتر بر اساس لول** 🏅\n"]
             for i, row in enumerate(rows, 1):
-                name = row.get('username') or f"کاربر ({row['user_id']})"
+                mention = await get_display_mention(bot, row['user_id'])
                 level = row.get('level', 0) or 0
-                lines.append(f"🔹 {i}. {name} (`{row['user_id']}`) ➔ **لول {level}**")
+                lines.append(f"🔹 {i}. {mention} ➔ **لول {level}**")
 
             await event.edit("\n".join(lines))
 
@@ -262,9 +280,9 @@ def register_admin_handlers(bot):
 
             lines = ["💰 **جدول ۱۵ نفر پولدارترین کاربرا** 💰\n"]
             for i, row in enumerate(rows, 1):
-                name = row.get('username') or f"کاربر ({row['user_id']})"
+                mention = await get_display_mention(bot, row['user_id'])
                 diamonds = row.get('diamonds', 0) or 0
-                lines.append(f"💎 {i}. {name} (`{row['user_id']}`) ➔ **{diamonds:,} طلا**")
+                lines.append(f"💎 {i}. {mention} ➔ **{diamonds:,} طلا**")
 
             await event.edit("\n".join(lines))
 

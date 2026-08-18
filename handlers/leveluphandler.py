@@ -184,5 +184,5 @@ async def handle_levelup_clicks(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 def register_levelup_handler(app):
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\*ارتقای لول$'), request_level_up))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^\ارتقا$'), request_level_up))
     app.add_handler(CallbackQueryHandler(handle_levelup_clicks, pattern=r'^lvlup_.*'))
