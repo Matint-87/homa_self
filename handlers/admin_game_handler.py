@@ -89,7 +89,7 @@ def register_admin_handlers(bot):
             for i, row in enumerate(rows, 1):
                 mention = await get_display_mention(bot, row['user_id'])
                 wins = row.get('wins_count', 0)
-                lines.append(f"🏅 {i}. {mention} ➔ **{wins} برد**")
+                lines.append(f"🏅 {i}. {mention} ➔ **{wins}**")
 
             await event.edit("\n".join(lines))
 
@@ -282,7 +282,7 @@ def register_admin_handlers(bot):
             for i, row in enumerate(rows, 1):
                 mention = await get_display_mention(bot, row['user_id'])
                 diamonds = row.get('diamonds', 0) or 0
-                lines.append(f"💰 {i}. {mention} ➔ **{diamonds:,} طلا**")
+                lines.append(f"💰 {i}. {mention} ➔ **{diamonds:,} **")
 
             await event.edit("\n".join(lines))
 
