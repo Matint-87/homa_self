@@ -6,10 +6,9 @@ from telethon import events, functions, types
 from telethon.errors import FloodWaitError, RPCError, MessageNotModifiedError
 from utils import get_pool  # دسترسی به asyncpg pool مشترک پروژه
 from config import BOT_TOKEN
+
 UPDATE_INTERVAL = 60   # ثانیه
 IDLE_SLEEP = 10        # ثانیه
-
-# توکن ربات شما برای ارسال پیام هشدار به کاربر در صورت اتمام موجودی
 
 CLOCK_EMOJIS = [
     "🕛", "🕧", "🕐", "🕜", "🕑", "🕝", "🕒", "🕞", "🕓", "🕟",
@@ -22,7 +21,7 @@ def _digit_map(chars: str) -> dict:
 
 FONTS = {
     1:  {**_digit_map("0123456789"), ":": ":"},
-    2:  {**_digit_map("０１２３４５６７８９"), ":": "："},
+    2:  {**_digit_map("０۱۲۳۴۵۶۷۸۹"), ":": "："},
     3:  {**_digit_map("𝟎𝟏𝟐𝟑𝟒𝟓𝟔𝟕𝟖𝟗"), ":": ":"}, 
     4:  {**_digit_map("𝟘𝟙𝟚𝟛𝟜𝟝𝟞𝟟𝟠𝟡"), ":": ":"},
     5:  {**_digit_map("𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟵"), ":": ":"},
@@ -118,24 +117,24 @@ async def _get_emoji_document_id(client, emoji_char: str):
     return None
 
 # ---------------------------------------------------------------------------
-# حلقه اصلی آپدیت ساعت کلاینت (به همراه بررسی موجودی طلا)
+# حلقه اصلی آپدیت ساعت کلاینت (اختصاصی برای هر کاربر)
 # ---------------------------------------------------------------------------
 async def _clock_loop(client, user_id: int):
     while True:
         try:
             pool = get_pool()
             
-            # بررسی موجودی طلا از جدول کاربران (جدول users و فیلد user_diamonds)
+            # بررسی موجودی طلا مختص همین کاربر
             user_row = await pool.fetchrow(
                 "SELECT user_diamonds FROM users WHERE user_id = $1", user_id
             )
             
-            # اگر موجودی طلا صفر یا منفی بود
+            # اگر موجودی طلا صفر یا منفی شد
             if user_row and user_row["user_diamonds"] is not None and user_row["user_diamonds"] <= 0:
                 settings = await db_get_settings(user_id)
                 if settings and (settings["bio_clock"] or settings["name_clock"] or settings["premium_clock"]):
                     
-                    # خاموش کردن قابلیت‌های ساعت در دیتابیس
+                    # خاموش کردن قابلیت‌های ساعت فقط برای همین کاربر
                     await db_update_settings(
                         user_id, 
                         bio_clock=False, 
@@ -143,7 +142,7 @@ async def _clock_loop(client, user_id: int):
                         premium_clock=False
                     )
                     
-                    # ریست کردن پروفایل کاربر به حالت اولیه
+                    # ریست کردن پروفایل فقط همین کاربر به حالت اولیه
                     try:
                         orig_name = settings.get("base_last_name", "User")
                         orig_bio = settings.get("base_bio", "")
@@ -156,7 +155,7 @@ async def _clock_loop(client, user_id: int):
                     except Exception:
                         pass
 
-                    # ارسال پیام هشدار به پیوی کاربر از طرف ربات
+                    # ارسال پیام هشدار به پیوی همین کاربر
                     await send_bot_alert(
                         user_id,
                         "⚠️ <b>هشدار اتمام موجودی!</b>\n\n"
