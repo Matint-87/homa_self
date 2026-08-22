@@ -156,75 +156,75 @@ def register_admin_handlers(bot):
             print(e)
 
     # 💰 ۳. دستور واریز طلا با ریپلای و ادیت پیام: *واریز طلا [عدد]
-    @bot.on(events.NewMessage(outgoing=True, pattern=r'^\*واریز طلا (\d+)$'))
-    async def handle_telethon_transfer(event):
-        if not is_admin(event.sender_id):
-            return
+    # @bot.on(events.NewMessage(outgoing=True, pattern=r'^\*واریز طلا (\d+)$'))
+    # async def handle_telethon_transfer(event):
+    #     if not is_admin(event.sender_id):
+    #         return
 
-        try:
-            # گرفتن مقدار عددی از پترن
-            amount = int(event.pattern_match.group(1))
+    #     try:
+    #         # گرفتن مقدار عددی از پترن
+    #         amount = int(event.pattern_match.group(1))
 
-            # بررسی اینکه حتما روی پیام کسی ریپلای شده باشد
-            reply = await event.get_reply_message()
-            if not reply:
-                await event.edit("❌ برای واریز، روی پیام کاربر مورد نظر ریپلای کنید!")
-                return
+    #         # بررسی اینکه حتما روی پیام کسی ریپلای شده باشد
+    #         reply = await event.get_reply_message()
+    #         if not reply:
+    #             await event.edit("❌ برای واریز، روی پیام کاربر مورد نظر ریپلای کنید!")
+    #             return
 
-            sender_id = event.sender_id
-            target_user_id = reply.sender_id
+    #         sender_id = event.sender_id
+    #         target_user_id = reply.sender_id
 
-            if not target_user_id:
-                await event.edit("❌ موفق به دریافت آیدی کاربر از روی ریپلای نشدم.")
-                return
+    #         if not target_user_id:
+    #             await event.edit("❌ موفق به دریافت آیدی کاربر از روی ریپلای نشدم.")
+    #             return
 
-            # جلوگیری از واریز به خود
-            if sender_id == target_user_id:
-                await event.edit("❌ شما نمی‌توانید به خودتان طلا واریز کنید!")
-                return
+    #         # جلوگیری از واریز به خود
+    #         if sender_id == target_user_id:
+    #             await event.edit("❌ شما نمی‌توانید به خودتان طلا واریز کنید!")
+    #             return
 
-            # بررسی موجودی فرستنده (ادمین)
-            from_balance = await get_user_diamonds(sender_id)
-            if from_balance < amount:
-                await event.edit(f"❌ موجودی کافی نیست. موجودی فعلی: {from_balance:,}")
-                return
+    #         # بررسی موجودی فرستنده (ادمین)
+    #         from_balance = await get_user_diamonds(sender_id)
+    #         if from_balance < amount:
+    #             await event.edit(f"❌ موجودی کافی نیست. موجودی فعلی: {from_balance:,}")
+    #             return
 
-            # اعمال تراکنش (کاهش از ادمین، افزایش به گیرنده)
-            new_sender_balance = await update_diamonds(sender_id, -amount)
-            if new_sender_balance is None:
-                await event.edit("❌ انتقال انجام نشد.")
-                return
+    #         # اعمال تراکنش (کاهش از ادمین، افزایش به گیرنده)
+    #         new_sender_balance = await update_diamonds(sender_id, -amount)
+    #         if new_sender_balance is None:
+    #             await event.edit("❌ انتقال انجام نشد.")
+    #             return
 
-            new_target_balance = await update_diamonds(target_user_id, amount)
-            if new_target_balance is None:
-                # بازگرداندن مقدار به ادمین در صورت خطا
-                await update_diamonds(sender_id, amount)
-                await event.edit("❌ خطا در واریز به گیرنده.")
-                return
+    #         new_target_balance = await update_diamonds(target_user_id, amount)
+    #         if new_target_balance is None:
+    #             # بازگرداندن مقدار به ادمین در صورت خطا
+    #             await update_diamonds(sender_id, amount)
+    #             await event.edit("❌ خطا در واریز به گیرنده.")
+    #             return
 
-            try:
-                target_user = await bot.get_entity(target_user_id)
-                target_name = target_user.first_name or "کاربر"
-            except Exception:
-                target_name = "کاربر"
+    #         try:
+    #             target_user = await bot.get_entity(target_user_id)
+    #             target_name = target_user.first_name or "کاربر"
+    #         except Exception:
+    #             target_name = "کاربر"
 
-            # ارسال پیام موفقیت و ویرایش پیام دستور
-            await event.edit(
-                f"✅ <b>واریز موفقیت‌آمیز!</b>\n\n"
-                f"👤 <b>گیرنده:</b> {target_name}\n"
-                f"💰 <b>مقدار:</b> {amount:,} طلا\n"
-                f"💵 <b>معادل تومان:</b> {amount * 35:,} تومان\n\n"
-                f"💰 <b>موجودی جدید گیرنده:</b> {new_target_balance:,} طلا\n"
-                f"💵 <b>معادل تومان:</b> {new_target_balance * 35:,} تومان",
-                parse_mode='html'
-            )
+    #         # ارسال پیام موفقیت و ویرایش پیام دستور
+    #         await event.edit(
+    #             f"✅ <b>واریز موفقیت‌آمیز!</b>\n\n"
+    #             f"👤 <b>گیرنده:</b> {target_name}\n"
+    #             f"💰 <b>مقدار:</b> {amount:,} طلا\n"
+    #             f"💵 <b>معادل تومان:</b> {amount * 35:,} تومان\n\n"
+    #             f"💰 <b>موجودی جدید گیرنده:</b> {new_target_balance:,} طلا\n"
+    #             f"💵 <b>معادل تومان:</b> {new_target_balance * 35:,} تومان",
+    #             parse_mode='html'
+    #         )
 
-        except Exception as e:
-            print(f"Error in telethon transfer: {e}")
-            try:
-                await event.edit("⚠️ خطایی در انجام تراکنش رخ داد.")
-            except:
-                await event.reply("⚠️ خطایی در انجام تراکنش رخ داد.")
+    #     except Exception as e:
+    #         print(f"Error in telethon transfer: {e}")
+    #         try:
+    #             await event.edit("⚠️ خطایی در انجام تراکنش رخ داد.")
+    #         except:
+    #             await event.reply("⚠️ خطایی در انجام تراکنش رخ داد.")
 
     # 🏅 ۴. دستور نمایش برترین لول‌ها (فقط ادمین): *برترین لول
     @bot.on(events.NewMessage(outgoing=True, pattern=r'^\*برترین لول$'))
