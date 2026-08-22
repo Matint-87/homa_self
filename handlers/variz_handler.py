@@ -43,15 +43,31 @@ def register_variz_handler(client):
             # ارسال پیام موفقیت و ویرایش پیام دستور
             new_balance = await get_balance(target.id)
 
-            await event.edit(
+            success_message = (
                 f"✅ <b>واریز موفقیت‌آمیز!</b>\n\n"
+                f"👤 <b>فرستنده:</b> {sender.first_name}\n"
                 f"👤 <b>گیرنده:</b> {target.first_name}\n"
                 f"💰 <b>مقدار:</b> {amount:,} طلا\n"
                 f"💵 <b>معادل تومان:</b> {amount * 35:,} تومان\n\n"
                 f"💰 <b>موجودی جدید گیرنده:</b> {new_balance:,} طلا\n"
-                f"💵 <b>معادل تومان:</b> {new_balance * 35:,} تومان",
-                parse_mode='html'
+                f"💵 <b>معادل تومان:</b> {new_balance * 35:,} تومان"
             )
+
+            # ۱. ویرایش پیام خود دستور (پیام شخصی شما)
+            await event.edit(success_message, parse_mode='html')
+
+            # ۲. ارسال پیام به گروه مورد نظر
+            # نکته: به جای آیدی زیر، باید آیدی عددی گروه خود را قرار دهید (مثلاً -100xxxxxxxxxx)
+            target_group = -1004431412108 # <-- آیدی عددی گروه را اینجا وارد کنید
+            
+            try:
+                await client.send_message(
+                    target_group, 
+                    f"📢 <b>گزارش تراکنش جدید:</b>\n\n" + success_message, 
+                    parse_mode='html'
+                )
+            except Exception as group_err:
+                print(f"Error sending message to group: {group_err}")
             
         except Exception as e:
             print(f"Error in telethon transfer: {e}")
