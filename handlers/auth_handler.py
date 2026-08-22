@@ -7,7 +7,14 @@ from telegram import (
     ReplyKeyboardMarkup,
     Update,
 )
-from telegram.ext import ContextTypes, ConversationHandler
+from telegram.ext import (
+    ContextTypes,
+    ConversationHandler,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+)
 from telethon.errors import (
     PhoneCodeExpiredError,
     PhoneCodeInvalidError,
@@ -27,7 +34,7 @@ from handlers.keybords import (
     get_join_keyboard,
     get_start_keyboard,
 )
-from utils import get_balance, update_balance, get_pool  # 👈 اضافه شدن get_pool از utils
+from utils import get_balance, update_balance, get_pool
 
 CHANNEL_ID = "@Homa_self_Ch"
 GROUP_ID = "@Homa_self_Gp"
@@ -35,7 +42,11 @@ CHANNEL_URL = "https://t.me/Homa_self_Ch"
 GROUP_URL = "https://t.me/Homa_self_Gp"
 SUPPORT_URL = "https://t.me/HOMA_SELFBOT_SUPPORT"
 
-MAIN_MENU, START_PAYMENT, PHONE, CODE, PASSWORD, ENTER_INVITE_CODE = range(6)
+# 👈 اضافه شدن مرحله BROADCAST_MESSAGE به استیت‌ها
+MAIN_MENU, START_PAYMENT, PHONE, CODE, PASSWORD, ENTER_INVITE_CODE, BROADCAST_MESSAGE = range(7)
+
+# 👈 آیدی عددی ادمین‌ها و مالکین ربات (آیدی خودتان را اینجا وارد کنید)
+ADMIN_IDS = [123456789, 987654321]  # آیدی‌های ادمین
 
 running_tasks = {}
 
@@ -107,6 +118,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⚙️ مدیریت و فعال‌سازی سلف‌بات", callback_data="menu_activation", style="success")]
     ]
 
+    # 👈 اضافه شدن دکمه پیام سراسری اگر کاربر ادمین باشد
+    if user_id in ADMIN_IDS:
+        keyboard.append([InlineKeyboardButton("📢 ارسال پیام سراسری به کاربران", callback_data="admin_broadcast", style="danger")])
+
     try:
         db_pool = get_pool()
         row = await db_pool.fetchrow(
@@ -175,6 +190,22 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
     if not await check_sub(user_id, context):
         await query.edit_message_text("⚠️ اشتراک شما قطع شده است. لطفا ابتدا عضو شوید:", reply_markup=get_join_keyboard())
         return MAIN_MENU
+
+    # 👈 هندل کردن کلیک دکمه پیام سراسری برای ادمین
+    if data == "admin_broadcast":
+        if user_id not in ADMIN_IDS:
+            await query.answer("❌ شما دسترسی به این بخش ندارید!", show_alert=True)
+            return MAIN_MENU
+
+        keyboard = [[InlineKeyboardButton("🔙 انصراف و بازگشت", callback_data="back_to_main", style="primary")]]
+        await query.edit_message_text(
+            "📢 <b>بخش ارسال پیام سراسری</b>\n\n"
+            "لطفاً پیامی که می‌خواهید برای **تمام کاربران** ربات ارسال شود را ارسال کنید:\n"
+            "(می‌توانید متن، عکس همراه با کپشن یا لینک ارسال کنید)",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+        return BROADCAST_MESSAGE
 
     if data == "menu_activation":
         session_exists = os.path.exists(f"new_sessions/{user_id}.session")
@@ -317,7 +348,7 @@ async def handle_main_menu_clicks(update: Update, context: ContextTypes.DEFAULT_
             f"💰 <b>مبلغ قابل پرداخت:</b> <code>{formatted_price}</code> تومان\n\n"
             f"📌 <b>شماره کارت جهت واریز:</b>\n<code>6219861443473474</code> محمد متین ترابی\n\n"
             f"⚠️ <b>دستورالعمل تایید سفارش:</b>\n"
-            f"لطفاً مبلغ دقیق فوق را به شماره کارت بالا واریز نمایید، سپس <b>تصویر فیش یا اسکرین‌شات رسید واریزی</b> (اگر فیش فیک بفرستید موجودی شما صفر میشود) .خود را برای پشتیبانی ارسال کنید تا حسابتان شارژ شود.\n\n"
+            f"لطفاً مبلغ دقیق فوق را به شماره کارت بالا واریز نمایید، سپس <b>تصویر فیش یا اسکرین‌شات رسید واریزی</b> خود را برای پشتیبانی ارسال کنید تا حسابتان شارژ شود.\n\n"
             f"📞 <b>ارتباط با پشتیبانی هوما:</b> @HOMA_SELFBOT_SUPPORT"
         )
 
@@ -497,6 +528,46 @@ async def process_invite_code_input(update: Update, context: ContextTypes.DEFAUL
         await update.message.reply_text("✅ کد معرف شما با موفقیت ثبت شد.\n🎁 پس از اینکه سلف‌بات خود را با طلا فعال کنید، جایزه ۳۵ طلا به معرف شما تعلق می‌گیرد.", reply_markup=get_start_keyboard())
     except Exception as e:
         await update.message.reply_text(f"⚠️ خطا در ارتباط با دیتابیس: {e}")
+
+    return MAIN_MENU
+
+
+# 👈 تابع پردازش و ارسال پیام سراسری برای ادمین
+async def process_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        return MAIN_MENU
+
+    if update.callback_query and update.callback_query.data == "back_to_main":
+        return await start(update, context)
+
+    await update.message.reply_text("⏳ در حال ارسال پیام سراسری به تمامی کاربران، لطفاً صبور باشید...")
+
+    success_count = 0
+    fail_count = 0
+
+    try:
+        db_pool = get_pool()
+        users = await db_pool.fetch("SELECT user_id FROM users_diamonds")
+        
+        for row in users:
+            target_user_id = row["user_id"]
+            try:
+                await update.message.copy(chat_id=target_user_id)
+                success_count += 1
+                await asyncio.sleep(0.05)
+            except Exception:
+                fail_count += 1
+
+        await update.message.reply_text(
+            f"✅ **پیام سراسری با موفقیت ارسال شد!**\n\n"
+            f"📤 ارسال شده به: `{success_count}` کاربر\n"
+            f"❌ ناموفق: `{fail_count}` کاربر",
+            reply_markup=get_start_keyboard(),
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ خطا در ارسال پیام سراسری: {e}", reply_markup=get_start_keyboard())
 
     return MAIN_MENU
 
@@ -715,4 +786,4 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ رمز عبور اشتباه است یا خطایی رخ داد:\n{e}\nلطفاً دوباره رمز را بفرستید:")
         return PASSWORD
-    
+

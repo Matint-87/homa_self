@@ -24,10 +24,11 @@ from utils import init_db_pool, close_db_pool, get_pool
 from handlers.random_game import register_dice_handlers
 from handlers.client_manager import load_existing_sessions, status_watcher
 from handlers.auth_handler import (
-    MAIN_MENU, START_PAYMENT, PHONE, CODE, PASSWORD, ENTER_INVITE_CODE,
+    MAIN_MENU, START_PAYMENT, PHONE, CODE, PASSWORD, ENTER_INVITE_CODE, BROADCAST_MESSAGE,
     start, handle_main_menu_clicks,
     handle_activation_payment,
-    get_phone, handle_code_calculator_clicks, get_password
+    get_phone, handle_code_calculator_clicks, get_password,
+    process_broadcast
 )
 from handlers.leveluphandler import register_levelup_handler
 from handlers.dice_game import (
@@ -153,6 +154,12 @@ conv_handler = ConversationHandler(
                 filters.TEXT & ~filters.COMMAND, 
                 lambda update, context: __import__('handlers.auth_handler', fromlist=['process_invite_code_input']).process_invite_code_input(update, context)
             ),
+        ],
+        # 👈 اضافه شدن حالت پیام سراسری برای ادمین
+        BROADCAST_MESSAGE: [
+            CallbackQueryHandler(handle_cancel_to_menu, pattern="^cancel_to_menu$"),
+            CallbackQueryHandler(handle_main_menu_clicks, pattern="^back_to_main$"),
+            MessageHandler(filters.ALL & ~filters.COMMAND, process_broadcast),
         ],
     },
     fallbacks=[
