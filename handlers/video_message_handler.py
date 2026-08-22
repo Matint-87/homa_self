@@ -3,25 +3,34 @@ import subprocess
 from telethon import events
 
 def video_message_handler(client):
-    @client.on(events.NewMessage(pattern=r'^\*ویدیو مسیج$'))
+    @client.on(events.NewMessage(pattern=r'^\*ویدیو مسیج$', outgoing=True))
     async def convert_to_video_note(event):
         reply_message = await event.get_reply_message()
         
         if not reply_message or not reply_message.video:
-            await event.edit("لطفاً این دستور را روی یک پیام **ویدیو** ریپلای کنید!")
+            # در سلف‌بات برای جلوگیری از خطای آیدی، یک پیام موقت می‌فرستیم و پاک می‌کنیم
+            temp_msg = await event.reply("❌ لطفاً این دستور را روی یک پیام **ویدیو** ریپلای کنید!")
+            await asyncio.sleep(3)
+            await temp_msg.delete()
             return
 
         user_id = event.sender_id
         input_path = f"downloads_{user_id}.mp4"
         output_path = f"output_note_{user_id}.mp4"
 
+        status_msg = await event.reply("⏳ در حال دانلود ویدیو...")
+
         try:
-            await event.edit("⏳ در حال دانلود ویدیو...")
-            await client.download_media(reply_message.video, file=input_path)
+            # دانلود صریح و مستقیم مدیا به مسیر مشخص
+            downloaded_file = await client.download_media(reply_message.video, file=input_path)
+            
+            if not downloaded_file or not os.path.exists(input_path):
+                await status_msg.edit("❌ دانلود ویدیو با شکست مواجه شد.")
+                return
 
-            await event.edit("🔄 در حال پردازش و تبدیل به ویدیو مسیج...")
+            await status_msg.edit("🔄 در حال پردازش و تبدیل به ویدیو مسیج...")
 
-            # دستور اصلاح‌شده و مقاوم‌تر برای ffmpeg
+            # دستور استاندارد ffmpeg
             cmd = [
                 "ffmpeg", "-y", "-i", input_path,
                 "-vf", "scale='if(gt(iw,ih),640,-2)':'if(gt(iw,ih),-2,640)',crop=min(iw\,ih):min(iw\,ih)",
@@ -30,19 +39,15 @@ def video_message_handler(client):
                 output_path
             ]
             
-            # اجرای ffmpeg
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             
-            # بررسی اینکه آیا فایل خروجی واقعاً ساخته شده است یا خیر
             if result.returncode != 0 or not os.path.exists(output_path):
-                error_log = result.stderr.decode('utf-8', errors='ignore')
-                print(f"FFmpeg Error: {error_log[-500:]}")  # چاپ خطا در کنسول برای بررسی
-                await event.edit("❌ خطا در پردازش ویدیو توسط ffmpeg.")
+                await status_msg.edit("❌ خطا در پردازش ویدیو با ffmpeg.")
                 return
 
-            await event.edit("📤 در حال ارسال ویدیو مسیج...")
+            await status_msg.edit("📤 در حال ارسال ویدیو مسیج...")
 
-            # ارسال به عنوان ویدیو نوت (گرد)
+            # ارسال به عنوان ویدیو نوت
             await client.send_file(
                 event.chat_id,
                 output_path,
@@ -50,10 +55,15 @@ def video_message_handler(client):
                 reply_to=reply_message.id
             )
             
+            # حذف پیام وضعیت و پیام دستور اصلی خودتان برای تمیزی چت
+            await status_msg.delete()
             await event.delete()
 
         except Exception as e:
-            await event.edit(f"❌ خطایی رخ داد: {str(e)}")
+            try:
+                await status_msg.edit(f"❌ خطایی رخ داد: {str(e)}")
+            except:
+                pass
             
         finally:
             # پاکسازی فایل‌های موقت کاربر
