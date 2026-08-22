@@ -2,7 +2,7 @@ import os
 import subprocess
 from telethon import events
 
-def register_handler(client):
+def video_message_handler(client):
     @client.on(events.NewMessage(pattern=r'^\*ویدیو مسیج$'))
     async def convert_to_video_note(event):
         reply_message = await event.get_reply_message()
