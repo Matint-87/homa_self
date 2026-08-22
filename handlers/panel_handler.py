@@ -335,64 +335,65 @@ async def handle_panel_clicks(update, context):
         )
         keyboard = [
             [
-                InlineKeyboardButton("نگهبان چت", callback_data=f"sett_guard_{owner_id}"),
-                InlineKeyboardButton("ساعت", callback_data=f"sett_time_{owner_id}"),
-                InlineKeyboardButton("حالت متن", callback_data=f"sett_textmode_{owner_id}")
+                InlineKeyboardButton("نگهبان چت", callback_data=f"sett_guard_{owner_id}", style="danger"),
+                InlineKeyboardButton("ساعت", callback_data=f"sett_time_{owner_id}", style="danger"),
+                InlineKeyboardButton("حالت متن", callback_data=f"sett_textmode_{owner_id}", style="danger")
             ],
             [
-                InlineKeyboardButton("اکشن", callback_data=f"sett_action_{owner_id}"),
-                InlineKeyboardButton("قفل‌ها", callback_data=f"sett_locks_{owner_id}"),
-                InlineKeyboardButton("دما", callback_data=f"sett_weater_{owner_id}"),
-                InlineKeyboardButton("پینگ", callback_data=f"sett_ping_{owner_id}")
+                InlineKeyboardButton("اکشن", callback_data=f"sett_action_{owner_id}", style="danger"),
+                InlineKeyboardButton("قفل‌ها", callback_data=f"sett_locks_{owner_id}", style="danger"),
+                InlineKeyboardButton("دما", callback_data=f"sett_weater_{owner_id}", style="danger"),
+                InlineKeyboardButton("پینگ", callback_data=f"sett_ping_{owner_id}", style="danger")
             ],
             [
-                InlineKeyboardButton("فیلتر کلمات", callback_data=f"sett_filter_{owner_id}"),
-                InlineKeyboardButton("منشی", callback_data=f"sett_secretary_{owner_id}"),
-                InlineKeyboardButton("دوست و دشمن", callback_data=f"sett_fr_en_{owner_id}")
+                InlineKeyboardButton("فیلتر کلمات", callback_data=f"sett_filter_{owner_id}", style="danger"),
+                InlineKeyboardButton("منشی", callback_data=f"sett_secretary_{owner_id}", style="danger"),
+                InlineKeyboardButton("دوست و دشمن", callback_data=f"sett_fr_en_{owner_id}", style="danger")
             ],
             [
-                InlineKeyboardButton("عضویت اجباری پیوی", callback_data=f"sett_fjoin_{owner_id}"),
-                InlineKeyboardButton("پاسخ خودکار", callback_data=f"sett_auto_res_{owner_id}")
+                InlineKeyboardButton("عضویت اجباری پیوی", callback_data=f"sett_fjoin_{owner_id}", style="danger"),
+                InlineKeyboardButton("پاسخ خودکار", callback_data=f"sett_auto_res_{owner_id}", style="danger")
             ],
             [
-                InlineKeyboardButton("اسپم", callback_data=f"sett_spam_{owner_id}"),
-                InlineKeyboardButton("ریکت", callback_data=f"sett_react_{owner_id}"),
-                InlineKeyboardButton("دانلودر", callback_data=f"sett_down_{owner_id}")
+                InlineKeyboardButton("اسپم", callback_data=f"sett_spam_{owner_id}", style="success"),
+                InlineKeyboardButton("ریکت", callback_data=f"sett_react_{owner_id}", style="success"),
+                InlineKeyboardButton("دانلودر", callback_data=f"sett_down_{owner_id}", style="success")
             ],
             [
-                InlineKeyboardButton("حذف", callback_data=f"sett_del_{owner_id}"),
-                InlineKeyboardButton("بلاک", callback_data=f"sett_block_{owner_id}"),
+                InlineKeyboardButton("حذف", callback_data=f"sett_del_{owner_id}", style="success"),
+                InlineKeyboardButton("بلاک", callback_data=f"sett_block_{owner_id}", style="success"),
                 # InlineKeyboardButton("فضول پروفایل", callback_data=f"sett_fozol_{owner_id}"),
-                InlineKeyboardButton("متن تصویر", callback_data=f"sett_orc_{owner_id}"),
-                InlineKeyboardButton("سکوت", callback_data=f"sett_mute_{owner_id}")
+                InlineKeyboardButton("متن تصویر", callback_data=f"sett_orc_{owner_id}", style="success"),
+                InlineKeyboardButton("سکوت", callback_data=f"sett_mute_{owner_id}", style="success")
             ],
             [
-                InlineKeyboardButton("هوش مصنوعی", callback_data=f"sett_ai_{owner_id}"),
-                InlineKeyboardButton("سین خودکار", callback_data=f"sett_seen_{owner_id}")
+                InlineKeyboardButton("ویدیو مسیج", callback_data=f"sett_vcms_{owner_id}", style="success"),
+                InlineKeyboardButton("هوش مصنوعی", callback_data=f"sett_ai_{owner_id}", style="success"),
+                InlineKeyboardButton("سین خودکار", callback_data=f"sett_seen_{owner_id}", style="success")
             ],
             [
-                InlineKeyboardButton("پروفایل", callback_data=f"sett_profileset_{owner_id}"),
-                InlineKeyboardButton("تقلب", callback_data=f"sett_cheat_{owner_id}"),
-                InlineKeyboardButton("انیمیشن", callback_data=f"sett_anim_{owner_id}"),
-                InlineKeyboardButton("ترجمه", callback_data=f"sett_trans_{owner_id}")
+                InlineKeyboardButton("پروفایل", callback_data=f"sett_profileset_{owner_id}", style="success"),
+                InlineKeyboardButton("تقلب", callback_data=f"sett_cheat_{owner_id}", style="success"),
+                InlineKeyboardButton("انیمیشن", callback_data=f"sett_anim_{owner_id}", style="success"),
+                InlineKeyboardButton("ترجمه", callback_data=f"sett_trans_{owner_id}", style="success")
             ],
             [
                 # InlineKeyboardButton("سرچ ویس آماده", callback_data=f"sett_voice_{owner_id}"),
-                InlineKeyboardButton("÷ / ×", callback_data=f"sett_calc_{owner_id}"),
+                InlineKeyboardButton("÷ / ×", callback_data=f"sett_calc_{owner_id}", style="primary"),
                 # InlineKeyboardButton("تگ", callback_data=f"sett_tag_{owner_id}"),
-                InlineKeyboardButton("تبدیل متن به ویس", callback_data=f"sett_ttv_{owner_id}")
+                InlineKeyboardButton("تبدیل متن به ویس", callback_data=f"sett_ttv_{owner_id}", style="primary")
             ],
             [
                 # InlineKeyboardButton("فضول پروفایل", callback_data=f"sett_fozol_{owner_id}"),
-                InlineKeyboardButton("اطلاعات", callback_data=f"sett_info_{owner_id}"),
-                InlineKeyboardButton("تبچی", callback_data=f"sett_tabchi_{owner_id}"),
-                InlineKeyboardButton("لوگو", callback_data=f"sett_logo_{owner_id}"),
-                InlineKeyboardButton("پروکسی", callback_data=f"sett_proxy_{owner_id}")
+                InlineKeyboardButton("اطلاعات", callback_data=f"sett_info_{owner_id}", style="primary"),
+                InlineKeyboardButton("تبچی", callback_data=f"sett_tabchi_{owner_id}", style="primary"),
+                InlineKeyboardButton("لوگو", callback_data=f"sett_logo_{owner_id}", style="primary"),
+                InlineKeyboardButton("پروکسی", callback_data=f"sett_proxy_{owner_id}", style="primary")
             ],
             [
-                InlineKeyboardButton("اسکرین", callback_data=f"sett_scr_{owner_id}"),
-                InlineKeyboardButton("رمز ساز", callback_data=f"sett_pass_{owner_id}"),
-                InlineKeyboardButton("کامنت اول", callback_data=f"sett_comment_{owner_id}")
+                InlineKeyboardButton("اسکرین", callback_data=f"sett_scr_{owner_id}", style="primary"),
+                InlineKeyboardButton("رمز ساز", callback_data=f"sett_pass_{owner_id}", style="primary"),
+                InlineKeyboardButton("کامنت اول", callback_data=f"sett_comment_{owner_id}", style="primary")
             ],
             [InlineKeyboardButton("« بازگشت", callback_data=f"panel_main_{owner_id}", style="primary")]
         ]
@@ -1791,6 +1792,29 @@ async def handle_panel_clicks(update, context):
             ">  دستورات\n"
             "\n"
             ">  `*پروکسی`\n"
+        )
+        
+        keyboard = [[InlineKeyboardButton("« بازگشت", callback_data=f"panel_sett_{owner_id}", style="primary")]]
+        
+        try:
+            await query.edit_message_text(
+                text=proxy_text,
+                parse_mode="MarkdownV2", 
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        except telegram.error.BadRequest as e:
+            if "Message is not modified" in str(e): 
+                pass
+            else:
+                print(f"⚠️ Error editing proxy menu: {e}")
+
+    elif data.startswith("sett_vcms_"):
+        proxy_text = (
+            ">  دستورات\n"
+            "\n"
+            ">  `*ویدیو مسیج`\n"
+            "\n"
+            ">  \n"
         )
         
         keyboard = [[InlineKeyboardButton("« بازگشت", callback_data=f"panel_sett_{owner_id}", style="primary")]]
