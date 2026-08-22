@@ -1,6 +1,7 @@
 import os
 import subprocess
 from telethon import events
+import asyncio
 
 def video_message_handler(client):
     @client.on(events.NewMessage(pattern=r'^\*ویدیو مسیج$', outgoing=True))
