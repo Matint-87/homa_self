@@ -240,7 +240,7 @@ async def start_dual_bots():
     # هندلرها
     main_app.add_handler(conv_handler)
     main_app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^طلا"), handle_balance_request))
-    # main_app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^واریز طلا \d+$"), handle_transfer_request))
+    main_app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^واریز طلا \d+$"), handle_transfer_request))
     register_rps_handlers(main_app)
     register_dice_handlers(main_app)
     register_xo_handlers(main_app)

@@ -8,7 +8,9 @@ from telegram.ext import ContextTypes
 # وارد کردن توابع کمکی دیتابیس آنلاین شما از سوپابیس
 from utils import get_balance, update_balance, save_game, get_game, delete_game
 
-# آدرس عکس پنل بازی
+# آیدی عددی گروهی که می‌خواهید رسیدها به آنجا فرستاده شوند
+# (اطمینان حاصل کنید که ربات عضو آن گروه شده باشد)
+TARGET_GROUP_ID = -1004431412108  # <-- آیدی گروه خود را اینجا قرار دهید
 
 def get_user_mention(user) -> str:
     """ساخت منشن کاربر سازگار با متد HTML"""
@@ -21,11 +23,10 @@ def get_user_mention(user) -> str:
 # HANDLE BALANCE REQUEST
 # =========================================
 async def handle_balance_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """نمایش موجودی طلا از سوپابیس"""
     user = update.effective_user
     current_balance = await get_balance(user.id)
     user_mention = get_user_mention(user)
-    
+
     text = (
         f"👤 <b>کاربر:</b> {user_mention}\n"
         f"🆔 <b>آیدی عددی:</b> <code>{user.id}</code>\n"
@@ -75,12 +76,14 @@ async def handle_transfer_request(update: Update, context: ContextTypes.DEFAULT_
         await message.reply_text(f"❌ موجودی طلای شما کافی نیست!\n💰 طلای شما: {from_balance:,} طلا")
         return
 
-    # اعمال ترکنش در دیتابیس آنلاین سوپابیس
+    # اعمال تراکنش در دیتابیس آنلاین سوپابیس
     await update_balance(from_user.id, -amount)
     await update_balance(to_user.id, amount)
 
     new_balance = await get_balance(from_user.id)
+    target_new_balance = await get_balance(to_user.id) # موجودی جدید گیرنده برای نمایش در رسید گروه
 
+    # متن رسید برای ارسال به کاربر (فرستنده)
     success_text = (
         f"✅ <b>واریز موفقیت‌آمیز بود!</b>\n\n"
         f"👤 <b>فرستنده:</b> {from_mention} (<code>{from_user.id}</code>)\n"
@@ -92,3 +95,22 @@ async def handle_transfer_request(update: Update, context: ContextTypes.DEFAULT_
     )
     await message.reply_text(success_text, parse_mode="HTML")
 
+    # متن مخصوص برای ارسال رسید به گروه مورد نظر
+    group_receipt_text = (
+        f"📢 <b>گزارش تراکنش جدید (واریز طلا)</b>\n\n"
+        f"👤 <b>فرستنده:</b> {from_mention} (<code>{from_user.id}</code>)\n"
+        f"👤 <b>گیرنده:</b> {to_mention} (<code>{to_user.id}</code>)\n"
+        f"💰 <b>مقدار:</b> {amount:,} طلا\n"
+        f"💵 <b>معادل تومان:</b> {(amount * 35):,} تومان\n\n"
+        f"📊 <b>موجودی جدید گیرنده:</b> {target_new_balance:,} طلا"
+    )
+
+    try:
+        # ارسال رسید به گروه از طریق ربات
+        await context.bot.send_message(
+            chat_id=TARGET_GROUP_ID,
+            text=group_receipt_text,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        print(f"Error sending transfer receipt to group: {e}")
