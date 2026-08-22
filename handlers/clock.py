@@ -119,52 +119,57 @@ async def _get_emoji_document_id(client, emoji_char: str):
 # ---------------------------------------------------------------------------
 # حلقه اصلی آپدیت ساعت کلاینت (اختصاصی برای هر کاربر)
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# حلقه اصلی آپدیت ساعت کلاینت (اختصاصی و ایمن برای هر کاربر)
+# ---------------------------------------------------------------------------
 async def _clock_loop(client, user_id: int):
     while True:
         try:
             pool = get_pool()
             
-            # بررسی موجودی طلا مختص همین کاربر
+            # بررسی موجودی طلا با ایمنی کامل در برابر مقادیر NULL یا عدم وجود رکورد
             user_row = await pool.fetchrow(
                 "SELECT user_diamonds FROM users WHERE user_id = $1", user_id
             )
             
-            # اگر موجودی طلا صفر یا منفی شد
-            if user_row and user_row["user_diamonds"] is not None and user_row["user_diamonds"] <= 0:
-                settings = await db_get_settings(user_id)
-                if settings and (settings["bio_clock"] or settings["name_clock"] or settings["premium_clock"]):
-                    
-                    # خاموش کردن قابلیت‌های ساعت فقط برای همین کاربر
-                    await db_update_settings(
-                        user_id, 
-                        bio_clock=False, 
-                        name_clock=False, 
-                        premium_clock=False
-                    )
-                    
-                    # ریست کردن پروفایل فقط همین کاربر به حالت اولیه
-                    try:
-                        orig_name = settings.get("base_last_name", "User")
-                        orig_bio = settings.get("base_bio", "")
-                        await client(functions.account.UpdateProfileRequest(
-                            first_name=orig_name[:64],
-                            last_name="",
-                            about=orig_bio[:70]
-                        ))
-                        await client(functions.account.UpdateEmojiStatusRequest(emoji_status=types.EmojiStatusEmpty()))
-                    except Exception:
-                        pass
+            # اگر کاربر در جدول موجود بود و موجودی طلا عددی معتبر و کوچکتر یا مساوی صفر بود
+            if user_row and user_row.get("user_diamonds") is not None:
+                diamonds = user_row["user_diamonds"]
+                if diamonds <= 0:
+                    settings = await db_get_settings(user_id)
+                    if settings and (settings["bio_clock"] or settings["name_clock"] or settings["premium_clock"]):
+                        
+                        # خاموش کردن قابلیت‌های ساعت فقط برای همین کاربر
+                        await db_update_settings(
+                            user_id, 
+                            bio_clock=False, 
+                            name_clock=False, 
+                            premium_clock=False
+                        )
+                        
+                        # ریست کردن پروفایل فقط همین کاربر به حالت اولیه
+                        try:
+                            orig_name = settings.get("base_last_name", "User")
+                            orig_bio = settings.get("base_bio", "")
+                            await client(functions.account.UpdateProfileRequest(
+                                first_name=orig_name[:64],
+                                last_name="",
+                                about=orig_bio[:70]
+                            ))
+                            await client(functions.account.UpdateEmojiStatusRequest(emoji_status=types.EmojiStatusEmpty()))
+                        except Exception:
+                            pass
 
-                    # ارسال پیام هشدار به پیوی همین کاربر
-                    await send_bot_alert(
-                        user_id,
-                        "⚠️ <b>هشدار اتمام موجودی!</b>\n\n"
-                        "❌ طلای شما به اتمام رسید (`user_diamonds = 0`).\n"
-                        "🔒 به همین دلیل، سیستم خودکار ساعت (بیو/نام/پریمیوم) شما خاموش شد."
-                    )
-                
-                await asyncio.sleep(UPDATE_INTERVAL)
-                continue
+                        # ارسال پیام هشدار به پیوی همین کاربر
+                        await send_bot_alert(
+                            user_id,
+                            "⚠️ <b>هشدار اتمام موجودی!</b>\n\n"
+                            "❌ طلای شما به اتمام رسید (`user_diamonds = 0`).\n"
+                            "🔒 به همین دلیل، سیستم خودکار ساعت (بیو/نام/پریمیوم) شما خاموش شد."
+                        )
+                    
+                    await asyncio.sleep(UPDATE_INTERVAL)
+                    continue
 
             # چک کردن تنظیمات ساعت
             settings = await db_get_settings(user_id)
@@ -216,7 +221,6 @@ async def _clock_loop(client, user_id: int):
             print(f"⚠️ Critical loop error for user {user_id}: {e}")
 
         await asyncio.sleep(UPDATE_INTERVAL)
-
 
 # ---------------------------------------------------------------------------
 # تابع اصلی ریجستر ساعت
