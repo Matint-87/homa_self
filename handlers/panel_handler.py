@@ -1814,7 +1814,7 @@ async def handle_panel_clicks(update, context):
             "\n"
             ">  `*ویدیو مسیج`\n"
             "\n"
-            ">  .روی یک ویدیو ریپلای کن؛ خروجی به صورت ویدیو مسیج در همان چت ارسال می‌شود\n"
+            ">  روی یک ویدیو ریپلای کن؛ خروجی به صورت ویدیو مسیج در همان چت ارسال می‌شود\n"
         )
         
         keyboard = [[InlineKeyboardButton("« بازگشت", callback_data=f"panel_sett_{owner_id}", style="primary")]]
