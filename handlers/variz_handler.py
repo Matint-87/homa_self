@@ -1,6 +1,10 @@
 from telethon import events
+import aiohttp  # برای ارسال درخواست به API ربات
 # ایمپورت توابع دیتابیس (مطمئن شوید مسیر درست است)
 from utils import get_balance, update_balance 
+from config import BOT_TOKEN
+# مشخصات ربات شما (برای ارسال پیام به گروه از طرف ربات)
+TARGET_GROUP_ID = -1004431412108   # آیدی عددی گروه
 
 def register_variz_handler(client):
     # پترن با ستاره شروع می‌شود و عدد بعد از آن را می‌گیرد
@@ -56,18 +60,24 @@ def register_variz_handler(client):
             # ۱. ویرایش پیام خود دستور (پیام شخصی شما)
             await event.edit(success_message, parse_mode='html')
 
-            # ۲. ارسال پیام به گروه مورد نظر
-            # نکته: به جای آیدی زیر، باید آیدی عددی گروه خود را قرار دهید (مثلاً -100xxxxxxxxxx)
-            target_group = -1004431412108 # <-- آیدی عددی گروه را اینجا وارد کنید
+            # ۲. ارسال پیام به گروه از طرف "ربات" (به جای اکانت شما)
+            group_text = f"📢 <b>گزارش تراکنش جدید:</b>\n\n" + success_message
             
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": TARGET_GROUP_ID,
+                "text": group_text,
+                "parse_mode": "HTML"
+            }
+
             try:
-                await client.send_message(
-                    target_group, 
-                    f"📢 <b>گزارش تراکنش جدید:</b>\n\n" + success_message, 
-                    parse_mode='html'
-                )
-            except Exception as group_err:
-                print(f"Error sending message to group: {group_err}")
+                # ارسال درخواست به API تلگرام با استفاده از aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload) as response:
+                        if response.status != 200:
+                            print(f"Error from Telegram API: {await response.text()}")
+            except Exception as bot_err:
+                print(f"Error sending message via bot to group: {bot_err}")
             
         except Exception as e:
             print(f"Error in telethon transfer: {e}")
