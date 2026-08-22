@@ -42,6 +42,8 @@ def render_clock(font_no: int) -> str:
 
 async def send_bot_alert(user_id: int, text: str):
     """ارسال پیام هشدار به کاربر از طرف ربات"""
+    if not BOT_TOKEN:
+        return
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": user_id,
@@ -117,127 +119,112 @@ async def _get_emoji_document_id(client, emoji_char: str):
     return None
 
 # ---------------------------------------------------------------------------
-# حلقه اصلی آپدیت ساعت کلاینت (اختصاصی برای هر کاربر)
+# حلقه مرکزی Multi-User برای بررسی و آپدیت ساعت تمامی کاربران
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# حلقه اصلی آپدیت ساعت کلاینت (اختصاصی و ایمن برای هر کاربر)
-# ---------------------------------------------------------------------------
-async def _clock_loop(client, user_id: int):
+async def _global_clock_loop(client):
     while True:
         try:
             pool = get_pool()
             
-            # بررسی موجودی طلا با ایمنی کامل در برابر مقادیر NULL یا عدم وجود رکورد
-            user_row = await pool.fetchrow(
-                "SELECT user_diamonds FROM users WHERE user_id = $1", user_id
+            # استخراج تمام کاربرانی که حداقل یکی از ساعت‌هایشان در جدول تنظیمات روشن است
+            active_users = await pool.fetch(
+                "SELECT * FROM user_clocks WHERE bio_clock = TRUE OR name_clock = TRUE OR premium_clock = TRUE"
             )
             
-            # اگر کاربر در جدول موجود بود و موجودی طلا عددی معتبر و کوچکتر یا مساوی صفر بود
-            if user_row and user_row.get("user_diamonds") is not None:
-                diamonds = user_row["user_diamonds"]
-                if diamonds <= 0:
-                    settings = await db_get_settings(user_id)
-                    if settings and (settings["bio_clock"] or settings["name_clock"] or settings["premium_clock"]):
-                        
-                        # خاموش کردن قابلیت‌های ساعت فقط برای همین کاربر
-                        await db_update_settings(
-                            user_id, 
-                            bio_clock=False, 
-                            name_clock=False, 
-                            premium_clock=False
-                        )
-                        
-                        # ریست کردن پروفایل فقط همین کاربر به حالت اولیه
-                        try:
-                            orig_name = settings.get("base_last_name", "User")
-                            orig_bio = settings.get("base_bio", "")
-                            await client(functions.account.UpdateProfileRequest(
-                                first_name=orig_name[:64],
-                                last_name="",
-                                about=orig_bio[:70]
-                            ))
-                            await client(functions.account.UpdateEmojiStatusRequest(emoji_status=types.EmojiStatusEmpty()))
-                        except Exception:
-                            pass
-
-                        # ارسال پیام هشدار به پیوی همین کاربر
-                        await send_bot_alert(
-                            user_id,
-                            "⚠️ <b>هشدار اتمام موجودی!</b>\n\n"
-                            "❌ طلای شما به اتمام رسید (`user_diamonds = 0`).\n"
-                            "🔒 به همین دلیل، سیستم خودکار ساعت (بیو/نام/پریمیوم) شما خاموش شد."
-                        )
+            for settings in active_users:
+                user_id = settings["user_id"]
+                
+                try:
+                    # 1. بررسی موجودی طلا مختص همین کاربر
+                    user_row = await pool.fetchrow(
+                        "SELECT user_diamonds FROM users WHERE user_id = $1", user_id
+                    )
                     
-                    await asyncio.sleep(UPDATE_INTERVAL)
-                    continue
+                    # اگر کاربر در جدول users بود و موجودی‌اش صفر یا کمتر بود
+                    if user_row and user_row.get("user_diamonds") is not None:
+                        diamonds = user_row["user_diamonds"]
+                        if diamonds <= 0:
+                            # خاموش کردن قابلیت‌های ساعت فقط برای همین کاربر
+                            await db_update_settings(
+                                user_id, 
+                                bio_clock=False, 
+                                name_clock=False, 
+                                premium_clock=False
+                            )
+                            
+                            # ریست کردن پروفایل همین کاربر به حالت اولیه
+                            try:
+                                orig_name = settings.get("base_last_name", "User")
+                                orig_bio = settings.get("base_bio", "")
+                                await client(functions.account.UpdateProfileRequest(
+                                    first_name=orig_name[:64],
+                                    last_name="",
+                                    about=orig_bio[:70]
+                                ))
+                                await client(functions.account.UpdateEmojiStatusRequest(emoji_status=types.EmojiStatusEmpty()))
+                            except Exception:
+                                pass
 
-            # چک کردن تنظیمات ساعت
-            settings = await db_get_settings(user_id)
-            if not settings:
-                await asyncio.sleep(IDLE_SLEEP)
-                continue
+                            # ارسال پیام هشدار به پیوی همین کاربر
+                            await send_bot_alert(
+                                user_id,
+                                "⚠️ <b>هشدار اتمام موجودی!</b>\n\n"
+                                "❌ طلای شما به اتمام رسید (`user_diamonds = 0`).\n"
+                                "🔒 به همین دلیل، سیستم خودکار ساعت (بیو/نام/پریمیوم) شما خاموش شد."
+                            )
+                            continue  # رد شدن از آپدیت ساعت برای این کاربر چون موجودیش تمام شده
 
-            any_active = settings["bio_clock"] or settings["name_clock"] or settings["premium_clock"]
-            if not any_active:
-                await asyncio.sleep(IDLE_SLEEP)
-                continue
+                    # 2. آپدیت ساعت برای کاربرانی که موجودی کافی دارند
+                    clock_str = render_clock(settings["font"])
 
-            clock_str = render_clock(settings["font"])
+                    # --- ساعت بیو ---
+                    if settings["bio_clock"]:
+                        base_bio = settings.get("base_bio") or ""
+                        new_about = f"{base_bio} {clock_str}".strip() if base_bio else clock_str
+                        try:
+                            await client(functions.account.UpdateProfileRequest(about=new_about[:70]))
+                        except FloodWaitError as e: await asyncio.sleep(e.seconds)
+                        except RPCError: pass
 
-            # --- ساعت بیو ---
-            if settings["bio_clock"]:
-                base_bio = settings.get("base_bio") or ""
-                new_about = f"{base_bio} {clock_str}".strip() if base_bio else clock_str
-                try:
-                    await client(functions.account.UpdateProfileRequest(about=new_about[:70]))
-                except FloodWaitError as e: await asyncio.sleep(e.seconds)
-                except RPCError: pass
+                    # --- ساعت نام ---
+                    if settings["name_clock"]:
+                        first_name_clean = settings.get("base_last_name") or "User" 
+                        try:
+                            await client(functions.account.UpdateProfileRequest(
+                                first_name=first_name_clean[:64],
+                                last_name=clock_str
+                            ))
+                        except FloodWaitError as e: await asyncio.sleep(e.seconds)
+                        except RPCError: pass
 
-            # --- ساعت نام ---
-            if settings["name_clock"]:
-                first_name_clean = settings.get("base_last_name") or "User" 
-                try:
-                    await client(functions.account.UpdateProfileRequest(
-                        first_name=first_name_clean[:64],
-                        last_name=clock_str
-                    ))
-                except FloodWaitError as e: await asyncio.sleep(e.seconds)
-                except RPCError: pass
+                    # --- ساعت پریمیوم ---
+                    if settings["premium_clock"]:
+                        try:
+                            iran_time = datetime.utcnow() + timedelta(hours=3, minutes=30)
+                            idx = (iran_time.hour % 12) * 2 + (1 if iran_time.minute >= 30 else 0)
+                            emoji = CLOCK_EMOJIS[idx]
+                            doc_id = await _get_emoji_document_id(client, emoji)
+                            if doc_id:
+                                await client(functions.account.UpdateEmojiStatusRequest(
+                                    emoji_status=types.EmojiStatus(document_id=doc_id)
+                                ))
+                        except RPCError: pass
 
-            # --- ساعت پریمیوم ---
-            if settings["premium_clock"]:
-                try:
-                    iran_time = datetime.utcnow() + timedelta(hours=3, minutes=30)
-                    idx = (iran_time.hour % 12) * 2 + (1 if iran_time.minute >= 30 else 0)
-                    emoji = CLOCK_EMOJIS[idx]
-                    doc_id = await _get_emoji_document_id(client, emoji)
-                    if doc_id:
-                        await client(functions.account.UpdateEmojiStatusRequest(
-                            emoji_status=types.EmojiStatus(document_id=doc_id)
-                        ))
-                except RPCError: pass
+                except Exception as user_err:
+                    print(f"⚠️ Error processing clock for user {user_id}: {user_err}")
 
         except Exception as e:
-            print(f"⚠️ Critical loop error for user {user_id}: {e}")
+            print(f"⚠️ Critical global clock loop error: {e}")
 
         await asyncio.sleep(UPDATE_INTERVAL)
+
 
 # ---------------------------------------------------------------------------
 # تابع اصلی ریجستر ساعت
 # ---------------------------------------------------------------------------
 def register_clock(client):
-    user_info = {"id": None}
-
-    async def init_client_and_start_loop():
-        try:
-            me = await client.get_me()
-            if me:
-                user_info["id"] = me.id
-                asyncio.create_task(_clock_loop(client, me.id))
-        except Exception as e:
-            print(f"⚠️ Error initializing clock user: {e}")
-
-    client.loop.create_task(init_client_and_start_loop())
+    # استارت کردن یک حلقه سراسری برای مدیریت تمام کاربران پلتفرم
+    client.loop.create_task(_global_clock_loop(client))
 
     pattern_bio = r"^[*.]ساعت\s+بیو\s+(روشن|خاموش)$"
     pattern_name = r"^[*.]ساعت\s+نام\s+(روشن|خاموش)$"
@@ -248,7 +235,7 @@ def register_clock(client):
     @client.on(events.NewMessage(outgoing=True, pattern=pattern_bio))
     async def _bio_handler(event):
         import re
-        u_id = user_info["id"] or event.sender_id
+        u_id = event.sender_id
         state = event.pattern_match.group(1) == "روشن"
 
         if state:
@@ -280,7 +267,7 @@ def register_clock(client):
     @client.on(events.NewMessage(outgoing=True, pattern=pattern_name))
     async def _name_handler(event):
         import re
-        u_id = user_info["id"] or event.sender_id
+        u_id = event.sender_id
         state = event.pattern_match.group(1) == "روشن"
 
         if state:
@@ -316,7 +303,7 @@ def register_clock(client):
 
     @client.on(events.NewMessage(outgoing=True, pattern=pattern_premium))
     async def _premium_handler(event):
-        u_id = user_info["id"] or event.sender_id
+        u_id = event.sender_id
         state = event.pattern_match.group(1) == "روشن"
         me = await client.get_me()
         if state and not getattr(me, "premium", False):
@@ -334,7 +321,7 @@ def register_clock(client):
 
     @client.on(events.NewMessage(outgoing=True, pattern=pattern_font))
     async def _font_handler(event):
-        u_id = user_info["id"] or event.sender_id
+        u_id = event.sender_id
         num = int(event.pattern_match.group(1))
         if num not in FONTS:
             await event.edit("⛔ فونت نامعتبر است (۱ تا ۱۰).")
@@ -347,7 +334,7 @@ def register_clock(client):
 
     @client.on(events.NewMessage(outgoing=True, pattern=pattern_status))
     async def _status_handler(event):
-        u_id = user_info["id"] or event.sender_id
+        u_id = event.sender_id
         s = await db_get_settings(u_id)
         txt = (
             "📋 وضعیت ساعت شما:\n\n"
