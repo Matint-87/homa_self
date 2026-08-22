@@ -46,7 +46,7 @@ SUPPORT_URL = "https://t.me/HOMA_SELFBOT_SUPPORT"
 MAIN_MENU, START_PAYMENT, PHONE, CODE, PASSWORD, ENTER_INVITE_CODE, BROADCAST_MESSAGE = range(7)
 
 # 👈 آیدی عددی ادمین‌ها و مالکین ربات (آیدی خودتان را اینجا وارد کنید)
-ADMIN_IDS = [123456789, 987654321]  # آیدی‌های ادمین
+ADMIN_IDS = [8004897709, 8668275780, 1632503299, 8413953138] 
 
 running_tasks = {}
 
